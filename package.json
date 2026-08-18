@@ -1,0 +1,34 @@
+{
+  "name": "pagepulse",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "compose:config": "node scripts/validate-compose.mjs",
+    "db:generate": "pnpm --filter @pagepulse/db generate",
+    "db:migrate": "pnpm --filter @pagepulse/db migrate",
+    "bootstrap:dev": "node scripts/bootstrap-dev.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "turbo": "^2.6.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^4.0.14",
+    "yaml": "^2.8.1"
+  }
+}

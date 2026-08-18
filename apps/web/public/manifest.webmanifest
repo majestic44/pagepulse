@@ -1,0 +1,9 @@
+{
+  "name": "PagePulse",
+  "short_name": "PagePulse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7fafb",
+  "theme_color": "#087f83",
+  "icons": []
+}

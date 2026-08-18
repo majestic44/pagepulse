@@ -1,0 +1,60 @@
+# Architecture
+
+## Service topology
+
+| Service               | Responsibility                                                | Publicly exposed     |
+| --------------------- | ------------------------------------------------------------- | -------------------- |
+| `gateway`             | Static web app, `/api` proxy, security headers                | Tunnel network only  |
+| `api`                 | Auth, REST/OpenAPI, monitor configuration, admin and PAT API  | Through gateway      |
+| `scheduler`           | Reconciles authoritative schedules into BullMQ Job Schedulers | No                   |
+| `fetch-worker`        | HTTP HTML/JSON/RSS fetching and extraction                    | No                   |
+| `browser-worker`      | Isolated Chromium rendering, login and visual selection       | No                   |
+| `change-worker`       | Normalization, identity, comparison and event creation        | No                   |
+| `notification-worker` | Immediate/digest/push/webhook delivery                        | No                   |
+| `maintenance-worker`  | Retention, recovery, stale-state and cleanup jobs             | No                   |
+| `migrate`             | One-shot, locked Drizzle migrations                           | No                   |
+| `mariadb`             | Authoritative durable application state                       | No host port         |
+| `redis`               | BullMQ jobs, locks, rate-limit and ephemeral coordination     | No host port         |
+| `cloudflared`         | Sole production ingress                                       | Outbound tunnel only |
+
+Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, and fake changing targets.
+
+## Check lifecycle
+
+1. MariaDB stores the monitor and next schedule state.
+2. Scheduler transactionally upserts a BullMQ Job Scheduler using the monitor ID and schedule revision.
+3. A due job routes to `page-fetch` or `browser-fetch` without secrets in its payload.
+4. Worker loads the current monitor revision, rejects stale/paused jobs, validates the destination, and fetches within limits.
+5. Worker writes a bounded raw snapshot to the private volume and enqueues a reference for `change-detection`.
+6. Change worker normalizes, extracts identities, evaluates rules, and commits check/event/snapshot metadata in MariaDB.
+7. A transactional outbox produces notification jobs after commit.
+8. Notification worker applies cooldown, quiet hours and digest rules, then records every delivery attempt.
+9. Maintenance removes expired files/rows and detects missing or orphaned artifacts.
+
+## Consistency
+
+- MariaDB is the source of truth for monitor state, check outcome, event and delivery history.
+- Redis jobs are replayable. Jobs use deterministic IDs and are idempotent.
+- Queue messages contain versioned IDs and correlation metadata only.
+- Transactional outbox rows bridge MariaDB commits to BullMQ.
+- Scheduler reconciliation repairs Redis after restart or data loss.
+- File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
+
+## Resource profile for 4 CPU / 8 GB
+
+- MariaDB: 1.5–2 GB limit.
+- PagePulse Redis: 384–512 MB with AOF every second.
+- API/gateway/scheduler/notification/maintenance: approximately 1–1.5 GB combined.
+- Fetch/change workers: approximately 512–768 MB combined.
+- Browser worker: one concurrent Chromium check by default, 1.5–2 GB limit.
+- Infisical stack consumes the remaining capacity and makes this host a constrained starting point.
+
+Dynamic browser concurrency must never exceed configured memory thresholds. Sustained queue lag, swap use, OOM events, or Infisical pressure triggers the documented 8 CPU/16 GB or split-host upgrade.
+
+## Network zones
+
+- `edge`: cloudflared and gateway.
+- `app`: gateway, API, scheduler and workers.
+- `data`: API/workers, MariaDB and Redis.
+- Browser jobs run with restricted capabilities, read-only root filesystem where possible, tmpfs scratch, and no access to the Docker socket.
+- Infisical is a separate Compose project and network; secrets are injected before PagePulse startup rather than granting every container network access to Infisical.

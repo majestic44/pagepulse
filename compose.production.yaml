@@ -1,0 +1,35 @@
+services:
+  gateway:
+    image: ghcr.io/majestic44/pagepulse-web:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+    ports: []
+  api:
+    image: ghcr.io/majestic44/pagepulse-api:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  scheduler:
+    image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  fetch-worker:
+    image: ghcr.io/majestic44/pagepulse-fetch-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  browser-worker:
+    image: ghcr.io/majestic44/pagepulse-browser-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  change-worker:
+    image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  notification-worker:
+    image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  maintenance-worker:
+    image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+    build: null
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.0
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, run]
+    environment:
+      TUNNEL_TOKEN: '${CLOUDFLARE_TUNNEL_TOKEN:?injected by Infisical}'
+    networks: [edge]
+    depends_on: { gateway: { condition: service_started } }
+    security_opt: [no-new-privileges:true]
