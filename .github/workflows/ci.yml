@@ -74,7 +74,6 @@ jobs:
         with: { version: 11.19.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level high
   docker-build:
     name: Docker image builds
