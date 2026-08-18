@@ -8,16 +8,19 @@ permissions:
   id-token: write
   attestations: write
 jobs:
+  release-images:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: matrix
+        run: echo "matrix=$(node scripts/release-images.mjs)" >> "$GITHUB_OUTPUT"
   images:
+    needs: release-images
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        include:
-          - { name: web, dockerfile: apps/web/Dockerfile }
-          - { name: api, dockerfile: apps/api/Dockerfile }
-          - { name: fetch-worker, dockerfile: apps/fetch-worker/Dockerfile }
-          - { name: browser-worker, dockerfile: apps/browser-worker/Dockerfile }
-          - { name: control-worker, dockerfile: apps/control-worker/Dockerfile }
+      matrix: ${{ fromJSON(needs.release-images.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3

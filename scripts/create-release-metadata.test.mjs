@@ -5,16 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
+import { releaseImages } from './release-images.mjs';
 
 const run = promisify(execFile);
-const images = ['web', 'api', 'fetch-worker', 'browser-worker', 'control-worker'];
 
 test('creates a complete immutable deployment manifest', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'pagepulse-release-metadata-'));
   t.after(() => rm(directory, { force: true, recursive: true }));
 
   const inputs = await Promise.all(
-    images.map(async (name, index) => {
+    releaseImages.map(async ({ name }, index) => {
       const path = join(directory, `${name}.json`);
       const digest = String(index).padStart(64, 'a');
       await writeFile(
@@ -42,10 +42,53 @@ test('creates a complete immutable deployment manifest', async (t) => {
     revision: 'a'.repeat(40),
     repository: 'majestic44/pagepulse',
     images: Object.fromEntries(
-      images.map((name, index) => [
+      releaseImages.map(({ name }, index) => [
         name,
         `ghcr.io/majestic44/pagepulse-${name}@sha256:${String(index).padStart(64, 'a')}`,
       ]),
     ),
   });
+});
+
+test('reports the invalid release tag in a typed validation error', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'pagepulse-release-metadata-'));
+  t.after(() => rm(directory, { force: true, recursive: true }));
+  const input = join(directory, 'web.json');
+  await writeFile(
+    input,
+    JSON.stringify({
+      name: 'web',
+      image: `ghcr.io/majestic44/pagepulse-web@sha256:${'a'.repeat(64)}`,
+    }),
+  );
+
+  await assert.rejects(
+    run(
+      process.execPath,
+      ['scripts/create-release-metadata.mjs', join(directory, 'output.json'), input],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          RELEASE_TAG: 'release-candidate',
+          GITHUB_REPOSITORY: 'majestic44/pagepulse',
+          GITHUB_SHA: 'a'.repeat(40),
+        },
+      },
+    ),
+    (error) => {
+      const stderr = String(error.stderr);
+      return (
+        stderr.includes('ReleaseMetadataValidationError: RELEASE_TAG') &&
+        stderr.includes('received "release-candidate"')
+      );
+    },
+  );
+});
+
+test('exports the release workflow matrix from the shared image configuration', async () => {
+  const { stdout } = await run(process.execPath, ['scripts/release-images.mjs'], {
+    cwd: process.cwd(),
+  });
+  assert.deepEqual(JSON.parse(stdout), { include: releaseImages });
 });
