@@ -65,9 +65,10 @@ Require the following checks from [`.github/workflows/ci.yml`](../.github/workfl
 - `Typecheck, lint and unit tests`
 - `API integration tests`
 - `Dependency vulnerability review`
+- `Dependency vulnerability scan`
 - Each `Docker image builds` matrix result: `web`, `api`, `fetch-worker`, `browser-worker`, and `control-worker` (copy the exact names GitHub displays, normally `Docker image builds (name)`).
 
-Do not require a check that does not run for PRs to `main`; a skipped or renamed check blocks merges. Current Docker CI validates only `linux/amd64`. Before claiming the required AMD64-and-ARM64 container gate is enforced, update CI to build both platforms, ensure its checks run on pull requests, then add those exact checks to this ruleset.
+Do not require a check that does not run for PRs to `main`; a skipped or renamed check blocks merges. Docker CI validates both `linux/amd64` and `linux/arm64` in each matrix job. CodeQL default setup is configured separately in GitHub; require its result only after it has reported consistently for pull requests.
 
 ### Optional GitHub Advanced Security controls
 
