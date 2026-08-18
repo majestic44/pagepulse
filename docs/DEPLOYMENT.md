@@ -19,10 +19,14 @@ Because Infisical’s own Compose stack requires PostgreSQL and Redis, budget an
 1. Features merge to `development` after required checks.
 2. A Conventional Commits release bot opens a human-reviewed release PR toward `main`.
 3. Merging creates the semantic tag and GitHub release.
-4. GitHub Actions builds/scans/signs AMD64 and ARM64 images and publishes immutable tag and digest metadata to GHCR.
-5. Plesk Git integration updates the deployment checkout and runs `scripts/deploy.sh <version>`.
+4. GitHub Actions builds, scans and attests AMD64 and ARM64 images, publishing an immutable semantic tag and digest metadata to GHCR.
+5. The release attaches `deployment-metadata.json` to the GitHub release and sends the same JSON body to the restricted Plesk deployment webhook. The receiver verifies the version, revision, repository and five `image@sha256` references before it updates the deployment checkout and runs `scripts/deploy.sh <version>`.
 6. Deployment captures current digests, pulls new images, runs the one-shot migration container, starts services, and checks readiness.
 7. Failure invokes `scripts/rollback.sh` with prior digests. Database migrations follow expand/contract so application rollback remains compatible.
+
+## Deployment metadata contract
+
+`deployment-metadata.json` is the deployment handoff. It contains `schemaVersion`, the semantic `version`, source `revision`, `repository`, and immutable digest references for `web`, `api`, `fetch-worker`, `browser-worker`, and `control-worker`. Treat the webhook body as untrusted until the Plesk receiver authenticates the request and validates this schema. Do not accept mutable image tags or image references outside `ghcr.io/majestic44/pagepulse-*`.
 
 ## Cloudflare
 
