@@ -25,6 +25,13 @@ pnpm compose:config
 docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
+## Container health
+
+Starter images run as non-root users and provide container health checks. After starting the stack, use
+`docker compose -f compose.yaml -f compose.dev.yaml ps` to confirm every service is healthy before testing
+against it. Worker checks confirm that the worker process is alive; dependency-aware readiness is added in
+Phase 1.
+
 ## Fake targets
 
 The fake-target service must provide deterministic scenarios for unchanged content, new jobs, keyword transitions, timestamp noise, redirect validation, oversized responses, slow/timeouts, login expiration, target disappearance and temporary recovery. Never test fetching protections against random third-party sites.
