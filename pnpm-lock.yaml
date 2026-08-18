@@ -100,6 +100,9 @@ importers:
 
   apps/devtools:
     dependencies:
+      '@pagepulse/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       fastify:
         specifier: ^5.6.2
         version: 5.12.0

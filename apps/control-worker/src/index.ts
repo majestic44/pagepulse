@@ -1,6 +1,7 @@
-import { createLogger } from '@pagepulse/config';
-const role = process.env.WORKER_ROLE ?? 'scheduler';
-const log = createLogger(`control-worker:${role}`);
+import { createLogger, loadEnvironment } from '@pagepulse/config';
+const env = loadEnvironment();
+const role = env.WORKER_ROLE;
+const log = createLogger(`control-worker:${role}`, env.LOG_LEVEL);
 log.info({ role }, 'placeholder control worker started');
 const timer = setInterval(() => log.debug({ role }, 'control worker heartbeat'), 30_000);
 function shutdown(signal: string) {

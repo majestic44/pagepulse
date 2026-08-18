@@ -1,9 +1,10 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { createLogger } from '@pagepulse/config';
+import { createLogger, loadEnvironment } from '@pagepulse/config';
 import { QueueNames, type CheckJob } from '@pagepulse/contracts';
-const log = createLogger('fetch-worker');
-const connection = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
+const env = loadEnvironment();
+const log = createLogger('fetch-worker', env.LOG_LEVEL);
+const connection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
 });
 const worker = new Worker<CheckJob>(
@@ -17,8 +18,8 @@ const worker = new Worker<CheckJob>(
   },
   {
     connection,
-    concurrency: Number(process.env.HTTP_FETCH_CONCURRENCY ?? 8),
-    prefix: process.env.QUEUE_PREFIX ?? 'pagepulse',
+    concurrency: env.HTTP_FETCH_CONCURRENCY,
+    prefix: env.QUEUE_PREFIX,
   },
 );
 async function shutdown(signal: string) {

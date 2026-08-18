@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@pagepulse/config": "workspace:*",
     "fastify": "^5.6.2"
   },
   "devDependencies": {

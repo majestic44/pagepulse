@@ -14,6 +14,10 @@ and the devtools fake-target/webhook sink. All development ports bind to loopbac
 
 Use only `.env.example` development values locally. Production values come from Infisical.
 
+Configuration is validated at startup. In production, sensitive configuration supports Docker/Infisical file
+mounts through `<VARIABLE>_FILE` (for example, `DATABASE_URL_FILE=/run/secrets/database_url`); do not set both
+the direct value and its `_FILE` form. Logs are structured JSON and redact sensitive keys recursively.
+
 ## Commands
 
 ```bash
