@@ -1,27 +1,47 @@
+x-production-logging: &production-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILES:-5}
+
+x-production-app: &production-app
+  environment:
+    NODE_ENV: production
+    APP_VERSION: ${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
+  logging: *production-logging
+
 services:
   gateway:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-web:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
     ports: []
   api:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-api:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   scheduler:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   fetch-worker:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-fetch-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   browser-worker:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-browser-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   change-worker:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   notification-worker:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   maintenance-worker:
+    <<: *production-app
     image: ghcr.io/majestic44/pagepulse-control-worker:${PAGEPULSE_VERSION:?set PAGEPULSE_VERSION}
     build: null
   cloudflared:
@@ -33,3 +53,4 @@ services:
     networks: [edge]
     depends_on: { gateway: { condition: service_started } }
     security_opt: [no-new-privileges:true]
+    logging: *production-logging

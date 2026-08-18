@@ -5,6 +5,8 @@
 - Plesk-managed Linux VPS, 4 CPU / 8 GB RAM initially.
 - Cloudflare Tunnel is the only ingress; no PagePulse, MariaDB, Redis or Infisical service exposes a public host port.
 - PagePulse and Infisical are separate Compose projects with independent data services, networks, volumes, release cadence and recovery.
+- Run production with `compose.yaml` and `compose.production.yaml` together. The production overlay replaces local
+  builds with versioned GHCR images, removes the gateway host-port binding, and sets `NODE_ENV=production`.
 
 ## Secrets
 
