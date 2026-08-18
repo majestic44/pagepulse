@@ -6,6 +6,6 @@
     "lint": { "dependsOn": ["^lint"] },
     "typecheck": { "dependsOn": ["^typecheck"] },
     "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] },
-    "test:integration": { "cache": false }
+    "test:integration": { "dependsOn": ["^build"], "cache": false }
   }
 }
