@@ -21,6 +21,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:release-metadata
       - run: pnpm compose:config
   api-integration:
     name: API integration tests

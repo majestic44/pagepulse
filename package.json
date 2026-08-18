@@ -13,6 +13,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:integration": "turbo run test:integration",
+    "test:release-metadata": "node --test scripts/create-release-metadata.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "compose:config": "node scripts/validate-compose.mjs",

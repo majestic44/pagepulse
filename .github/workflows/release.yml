@@ -6,6 +6,7 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  attestations: write
 jobs:
   images:
     runs-on: ubuntu-latest
@@ -26,7 +27,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -34,14 +36,62 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           sbom: true
-          tags: ghcr.io/majestic44/pagepulse-${{ matrix.name }}:${{ github.ref_name }},ghcr.io/majestic44/pagepulse-${{ matrix.name }}:latest
-  deploy-notify:
+          tags: ghcr.io/majestic44/pagepulse-${{ matrix.name }}:${{ github.ref_name }},ghcr.io/majestic44/pagepulse-${{ matrix.name }}:sha-${{ github.sha }}
+      - name: Attest image provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/majestic44/pagepulse-${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Scan published image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/majestic44/pagepulse-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Write immutable image metadata
+        env:
+          IMAGE: ghcr.io/majestic44/pagepulse-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p release-metadata
+          printf '{"name":"%s","image":"%s"}\n' '${{ matrix.name }}' "$IMAGE" > release-metadata/${{ matrix.name }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-image-${{ matrix.name }}
+          path: release-metadata/${{ matrix.name }}.json
+          if-no-files-found: error
+  deployment-metadata:
     needs: images
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-image-*
+          path: release-metadata
+          merge-multiple: true
+      - name: Create deployment metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/create-release-metadata.mjs deployment-metadata.json release-metadata/*.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployment-metadata-${{ github.ref_name }}
+          path: deployment-metadata.json
+          if-no-files-found: error
+      - name: Attach deployment metadata to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" deployment-metadata.json --clobber
       - name: Trigger restricted Plesk Git deployment webhook
         env:
           PLESK_DEPLOY_WEBHOOK_URL: ${{ secrets.PLESK_DEPLOY_WEBHOOK_URL }}
         run: |
           test -n "$PLESK_DEPLOY_WEBHOOK_URL"
-          curl --fail --silent --show-error --max-time 20 --retry 2 --request POST "$PLESK_DEPLOY_WEBHOOK_URL"
+          curl --fail --silent --show-error --max-time 20 --retry 2 \
+            --header 'Content-Type: application/json' \
+            --data-binary @deployment-metadata.json \
+            --request POST "$PLESK_DEPLOY_WEBHOOK_URL"
