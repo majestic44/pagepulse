@@ -9,7 +9,8 @@
 
 ## Local stack
 
-`compose.yaml` defines production-shaped core services. `compose.dev.yaml` adds Mailpit, Adminer, Bull Board, webhook sink, fake targets and bind-mounted development apps.
+`compose.yaml` defines production-shaped core services. `compose.dev.yaml` adds Mailpit, Adminer, Bull Board,
+and the devtools fake-target/webhook sink. All development ports bind to loopback only.
 
 Use only `.env.example` development values locally. Production values come from Infisical.
 
