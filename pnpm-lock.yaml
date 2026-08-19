@@ -169,6 +169,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@pagepulse/config':
+        specifier: workspace:*
+        version: link:../config
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.2(mysql2@3.23.3(@types/node@24.13.3))

@@ -45,5 +45,6 @@
 
 - Drizzle SQL migrations are forward-only in production.
 - Destructive changes use expand/migrate/contract across releases.
-- The deployment migration container obtains a MariaDB advisory lock and records application schema compatibility.
+- The migration runner obtains the `pagepulse_migrations` MariaDB advisory lock before applying SQL migrations.
+- Each successful migration run records the schema version, migration identifier, compatible application versions, and deployed application version in `schema_compatibility`.
 - Every migration requires a restore/rollback note even when the database change itself is not reversed.
