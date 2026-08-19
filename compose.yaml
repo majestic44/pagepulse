@@ -39,7 +39,9 @@ services:
     networks: [edge, app]
     ports: ['127.0.0.1:${PAGEPULSE_HTTP_PORT:-8080}:8080']
     read_only: true
-    tmpfs: [/var/cache/nginx, /var/run]
+    tmpfs:
+      - /tmp:mode=1777
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: [CMD-SHELL, 'wget -qO- http://127.0.0.1:8080/ >/dev/null']
@@ -94,7 +96,8 @@ services:
     shm_size: 512mb
     cap_drop: [ALL]
     read_only: true
-    tmpfs: [/tmp:size=512m, mode=1777]
+    tmpfs:
+      - /tmp:size=512m,mode=1777
     volumes: [snapshots:/data/snapshots]
     deploy:
       resources:
@@ -105,6 +108,8 @@ services:
     <<: *app-service
     build: { context: ., dockerfile: apps/control-worker/Dockerfile }
     environment: { <<: *app-environment, WORKER_ROLE: change-detection }
+    read_only: true
+    tmpfs: [/tmp]
     volumes: [snapshots:/data/snapshots]
 
   notification-worker:
@@ -116,6 +121,8 @@ services:
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_FROM: ${SMTP_FROM:-PagePulse <pagepulse@example.test>}
+    read_only: true
+    tmpfs: [/tmp]
 
   maintenance-worker:
     <<: *app-service
@@ -126,6 +133,8 @@ services:
       SNAPSHOT_RETENTION_DAYS: ${SNAPSHOT_RETENTION_DAYS:-7}
       CHECK_HISTORY_RETENTION_DAYS: ${CHECK_HISTORY_RETENTION_DAYS:-30}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-90}
+    read_only: true
+    tmpfs: [/tmp]
     volumes: [snapshots:/data/snapshots]
 
   mariadb:
