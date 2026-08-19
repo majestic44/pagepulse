@@ -1,4 +1,6 @@
 import type { Connection } from 'mysql2/promise';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -60,8 +62,9 @@ describe('withMigrationLock', () => {
 
 describe('isMigrationEntrypoint', () => {
   it('recognizes a relative migration script path', () => {
-    expect(
-      isMigrationEntrypoint('src/migrate.ts', new URL('./migrate.ts', import.meta.url).href),
-    ).toBe(true);
+    const moduleUrl = import.meta.url.replace(/\.test\.([cm]?[jt]s)$/, '.$1');
+    const entrypoint = relative(process.cwd(), fileURLToPath(moduleUrl));
+
+    expect(isMigrationEntrypoint(entrypoint, moduleUrl)).toBe(true);
   });
 });

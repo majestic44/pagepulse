@@ -13,9 +13,7 @@
   },
   "dependencies": {
     "@pagepulse/config": "workspace:*",
-    "@pagepulse/contracts": "workspace:*",
-    "bullmq": "^5.66.4",
-    "ioredis": "^5.8.2",
+    "@pagepulse/queue": "workspace:*",
     "playwright": "^1.57.0"
   },
   "devDependencies": {

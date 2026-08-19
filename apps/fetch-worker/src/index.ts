@@ -1,31 +1,48 @@
-import { Worker } from 'bullmq';
-import { Redis } from 'ioredis';
 import { createLogger, loadEnvironment } from '@pagepulse/config';
-import { QueueNames, type CheckJob } from '@pagepulse/contracts';
-const env = loadEnvironment();
-const log = createLogger('fetch-worker', env.LOG_LEVEL);
-const connection = new Redis(env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
-const worker = new Worker<CheckJob>(
-  QueueNames.pageFetch,
-  (job) => {
-    log.info(
-      { jobId: job.id, monitorId: job.data.monitorId, correlationId: job.data.correlationId },
-      'placeholder check claimed',
-    );
-    return Promise.resolve({ status: 'not-implemented' });
-  },
-  {
+import {
+  createRedisConnection,
+  createValidatedWorker,
+  installGracefulShutdown,
+  QueueNames,
+} from '@pagepulse/queue';
+
+function startFetchWorker() {
+  const environment = loadEnvironment();
+  const logger = createLogger('fetch-worker', environment.LOG_LEVEL);
+  const connection = createRedisConnection(environment.REDIS_URL);
+  connection.on('error', (error) => logger.error({ error }, 'Redis connection failed'));
+
+  const worker = createValidatedWorker(
+    QueueNames.pageFetch,
     connection,
-    concurrency: env.HTTP_FETCH_CONCURRENCY,
-    prefix: env.QUEUE_PREFIX,
-  },
-);
-async function shutdown(signal: string) {
-  log.info({ signal }, 'shutting down');
-  await worker.close();
-  await connection.quit();
+    environment.QUEUE_PREFIX,
+    (job) => {
+      logger.info(
+        {
+          checkId: job.data.checkId,
+          correlationId: job.data.correlationId,
+          jobId: job.id,
+          monitorId: job.data.monitorId,
+        },
+        'Placeholder page-fetch check claimed',
+      );
+      return Promise.resolve({ status: 'not-implemented' });
+    },
+    { concurrency: environment.HTTP_FETCH_CONCURRENCY },
+  );
+  worker.on('error', (error) => logger.error({ error }, 'Page-fetch worker failed'));
+
+  installGracefulShutdown({
+    connection,
+    onFailure: (signal, error) => {
+      logger.error({ error, signal }, 'Page-fetch worker shutdown failed');
+      process.exitCode = 1;
+    },
+    onStart: (signal) => logger.info({ signal }, 'Shutting down page-fetch worker'),
+    resources: [worker],
+  });
+
+  return { connection, worker };
 }
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-process.on('SIGINT', () => void shutdown('SIGINT'));
+
+startFetchWorker();
