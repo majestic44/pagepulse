@@ -1,5 +1,8 @@
 import Fastify from 'fastify';
-const app = Fastify({ logger: true });
+import { createLogger, loadEnvironment } from '@pagepulse/config';
+
+const env = loadEnvironment();
+const app = Fastify({ loggerInstance: createLogger('devtools', env.LOG_LEVEL) });
 let generation = 0;
 const deliveries: unknown[] = [];
 app.get('/targets/jobs', (_request, reply) =>
@@ -35,4 +38,4 @@ app.delete('/webhook/deliveries', () => {
   deliveries.splice(0);
   return { cleared: true };
 });
-await app.listen({ host: '0.0.0.0', port: Number(process.env.PORT ?? 4010) });
+await app.listen({ host: '0.0.0.0', port: env.DEVTOOLS_PORT });

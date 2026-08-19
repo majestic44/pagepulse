@@ -45,6 +45,9 @@ Chromium runs without host filesystem or Docker socket access, under a non-root 
 
 Allowed: correlation/request/job/monitor/member IDs, timing, result class, service/version, target domain. Forbidden: full URLs/query strings, email/name, credentials, cookies, authorization/custom headers, request bodies, fetched content, webhook payload secrets, TOTP, PATs and encryption material.
 
+The shared logger recursively redacts sensitive field names before serializing JSON. New log fields must use a
+domain, identifier or result class rather than a full URL, personal data or secret value.
+
 ## Security gates
 
 Dependency review and vulnerability scanning block release according to documented severity policy. Container images run as non-root, pin base-image digests during release hardening, publish SBOM/provenance, and are scanned before GHCR publication.
