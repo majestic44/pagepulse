@@ -32,11 +32,11 @@ describe('loadEnvironment', () => {
     });
   });
 
-  it('loads a secret from a file and removes its trailing newline', async () => {
+  it('loads a secret from a file and removes all trailing whitespace', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'pagepulse-config-'));
     temporaryDirectories.push(directory);
     const secretPath = join(directory, 'redis-url');
-    await writeFile(secretPath, 'redis://:secret@redis:6379/0\n');
+    await writeFile(secretPath, 'redis://:secret@redis:6379/0  \n\n');
 
     const environment = loadEnvironment({ REDIS_URL_FILE: secretPath });
 
@@ -52,10 +52,22 @@ describe('loadEnvironment', () => {
     ).toThrow(EnvironmentSecretFileError);
   });
 
-  it('reports invalid cross-field configuration', () => {
-    expect(() =>
-      loadEnvironment({ BROWSER_CONCURRENCY_MIN: '3', BROWSER_CONCURRENCY_MAX: '2' }),
-    ).toThrow(EnvironmentValidationError);
+  it('reports invalid cross-field configuration with its variable path', () => {
+    let validationError: EnvironmentValidationError | undefined;
+
+    try {
+      loadEnvironment({ BROWSER_CONCURRENCY_MIN: '3', BROWSER_CONCURRENCY_MAX: '2' });
+    } catch (error) {
+      if (error instanceof EnvironmentValidationError) {
+        validationError = error;
+      }
+    }
+
+    expect(validationError).toBeInstanceOf(EnvironmentValidationError);
+    expect(validationError?.message).toContain('BROWSER_CONCURRENCY_MIN:');
+    expect(validationError?.issues).toContainEqual(
+      expect.objectContaining({ path: ['BROWSER_CONCURRENCY_MIN'] }),
+    );
   });
 });
 

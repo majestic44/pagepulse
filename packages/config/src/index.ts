@@ -66,6 +66,12 @@ const environmentSchema = z
 
 export type Environment = z.infer<typeof environmentSchema>;
 
+export type EnvironmentValidationIssue = Readonly<{
+  code: string;
+  message: string;
+  path: ReadonlyArray<PropertyKey>;
+}>;
+
 export class EnvironmentSecretFileError extends Error {
   constructor(variable: string, filePath: string, cause?: unknown) {
     super(`Unable to load ${variable}_FILE at ${JSON.stringify(filePath)}`, { cause });
@@ -74,8 +80,20 @@ export class EnvironmentSecretFileError extends Error {
 }
 
 export class EnvironmentValidationError extends Error {
-  constructor(readonly issues: ReadonlyArray<{ message: string }>) {
-    super(`Invalid PagePulse environment: ${issues.map((issue) => issue.message).join('; ')}`);
+  readonly issues: ReadonlyArray<EnvironmentValidationIssue>;
+
+  constructor(issues: ReadonlyArray<EnvironmentValidationIssue>) {
+    const normalizedIssues = issues.map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      path: [...issue.path],
+    }));
+    super(
+      `Invalid PagePulse environment: ${normalizedIssues
+        .map((issue) => `${issue.path.map(String).join('.') || 'environment'}: ${issue.message}`)
+        .join('; ')}`,
+    );
+    this.issues = normalizedIssues;
     this.name = 'EnvironmentValidationError';
   }
 }
@@ -95,7 +113,7 @@ function loadSecretFile(variable: (typeof secretFileVariables)[number], input: N
     return inlineValue;
   }
   try {
-    const value = readFileSync(filePath, 'utf8').replace(/\r?\n$/, '');
+    const value = readFileSync(filePath, 'utf8').trimEnd();
     if (value.length === 0) {
       throw new Error('Secret file is empty');
     }
