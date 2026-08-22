@@ -19,6 +19,19 @@
 
 Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, and fake changing targets.
 
+## Service health
+
+- `GET /health/live` is public and dependency-free. It confirms only that the API process can respond.
+- `GET /health/ready` concurrently probes MariaDB and Redis. It returns `200` only when both are reachable,
+  otherwise `503`, and never includes connection errors or configuration values.
+- `GET /api/v1/system/version` is public and returns only the service name, application version and uptime.
+- `GET /api/v1/system/diagnostics` is not registered unless `OWNER_DIAGNOSTICS_TOKEN` is configured. It requires
+  that token as a Bearer credential and returns safe dependency status labels only. Phase 2 owner-session
+  authorization will replace this bootstrap guard.
+- Worker container health checks require both a live worker process and a successful Redis probe.
+- The gateway re-resolves the API's internal Compose DNS name for proxied requests, so an API container can be
+  recreated without leaving the gateway bound to a stale container address.
+
 ## Check lifecycle
 
 1. MariaDB stores the monitor and next schedule state.

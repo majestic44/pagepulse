@@ -34,8 +34,15 @@ docker compose -f compose.yaml -f compose.dev.yaml up --build
 
 Starter images run as non-root users and provide container health checks. After starting the stack, use
 `docker compose -f compose.yaml -f compose.dev.yaml ps` to confirm every service is healthy before testing
-against it. Worker checks confirm that the worker process is alive; dependency-aware readiness is added in
-Phase 1.
+against it. API liveness is dependency-free; API readiness requires MariaDB and Redis. Worker checks require
+both a live worker process and Redis connectivity.
+
+Detailed dependency status is unavailable by default. Before owner sessions are implemented, configure
+`OWNER_DIAGNOSTICS_TOKEN` (or `OWNER_DIAGNOSTICS_TOKEN_FILE`) to enable the temporary owner diagnostics endpoint:
+
+```bash
+curl -H "Authorization: Bearer $OWNER_DIAGNOSTICS_TOKEN" http://127.0.0.1:8080/api/v1/system/diagnostics
+```
 
 ## Fake targets
 

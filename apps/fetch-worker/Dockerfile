@@ -8,5 +8,5 @@ ENV NODE_ENV=production
 USER node
 WORKDIR /app
 COPY --from=build --chown=node:node /app /app
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 CMD node -e "process.kill(1, 0)"
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 CMD node packages/queue/dist/healthcheck.js
 CMD ["node", "apps/fetch-worker/dist/index.js"]

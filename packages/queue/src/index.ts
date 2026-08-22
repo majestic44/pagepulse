@@ -18,6 +18,14 @@ export const redisConnectionOptions = Object.freeze({
   maxRetriesPerRequest: null,
 });
 
+const redisReadinessOptions = Object.freeze({
+  ...redisConnectionOptions,
+  connectTimeout: 1_000,
+  enableOfflineQueue: false,
+  lazyConnect: true,
+  retryStrategy: () => null,
+});
+
 export type QueuePayloadValidationIssue = Readonly<{
   message: string;
   path: string;
@@ -66,6 +74,16 @@ export function parseQueuePayload<Name extends QueueName>(
 
 export function createRedisConnection(redisUrl: string) {
   return new Redis(redisUrl, redisConnectionOptions);
+}
+
+export async function probeRedis(redisUrl: string) {
+  const connection = new Redis(redisUrl, redisReadinessOptions);
+  try {
+    await connection.connect();
+    await connection.ping();
+  } finally {
+    connection.disconnect();
+  }
 }
 
 export function createQueue<Name extends QueueName>(

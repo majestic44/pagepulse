@@ -111,3 +111,26 @@ export const HealthResponse = Type.Object({
   version: Type.String(),
   uptimeSeconds: Type.Integer(),
 });
+
+export const VersionResponse = Type.Object({
+  service: Type.String(),
+  version: Type.String(),
+  uptimeSeconds: Type.Integer(),
+});
+
+const DependencyHealthStatus = Type.Union([Type.Literal('ok'), Type.Literal('unavailable')]);
+
+export const DiagnosticsResponse = Type.Object({
+  status: Type.Union([Type.Literal('ok'), Type.Literal('degraded')]),
+  service: Type.String(),
+  version: Type.String(),
+  uptimeSeconds: Type.Integer(),
+  dependencies: Type.Object({
+    database: DependencyHealthStatus,
+    redis: DependencyHealthStatus,
+  }),
+});
+
+export const UnauthorizedResponse = Type.Object({
+  error: Type.Literal('Unauthorized'),
+});
