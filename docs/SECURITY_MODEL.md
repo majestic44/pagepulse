@@ -48,6 +48,11 @@ Allowed: correlation/request/job/monitor/member IDs, timing, result class, servi
 The shared logger recursively redacts sensitive field names before serializing JSON. New log fields must use a
 domain, identifier or result class rather than a full URL, personal data or secret value.
 
+Public health endpoints expose only service/version/uptime and an aggregate readiness result. Detailed dependency
+status is available only when the temporary `OWNER_DIAGNOSTICS_TOKEN` Bearer guard is configured; it returns status
+labels and never connection errors, addresses, configuration values or queue payloads. Replace that bootstrap guard
+with owner-session authorization in Phase 2.
+
 ## Security gates
 
 Dependency review and vulnerability scanning block release according to documented severity policy. Container images run as non-root, pin base-image digests during release hardening, publish SBOM/provenance, and are scanned before GHCR publication.

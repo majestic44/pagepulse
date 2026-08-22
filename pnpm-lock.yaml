@@ -46,6 +46,12 @@ importers:
       '@pagepulse/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@pagepulse/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@pagepulse/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
       '@sinclair/typebox':
         specifier: ^0.34.41
         version: 0.34.52
