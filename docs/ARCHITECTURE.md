@@ -35,10 +35,24 @@ Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, 
 
 - MariaDB is the source of truth for monitor state, check outcome, event and delivery history.
 - Redis jobs are replayable. Jobs use deterministic IDs and are idempotent.
-- Queue messages contain versioned IDs and correlation metadata only.
+- Queue messages are TypeBox-validated versioned payloads containing IDs and correlation metadata only; credentials, cookies, secrets and fetched content are rejected.
+- Workers stop claiming jobs before their Redis connection is closed, allowing BullMQ to finish active jobs during `SIGTERM`/`SIGINT` shutdown.
 - Transactional outbox rows bridge MariaDB commits to BullMQ.
 - Scheduler reconciliation repairs Redis after restart or data loss.
 - File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
+
+## Queue contracts
+
+| Queue                          | Consumer                | Version 1 payload                             |
+| ------------------------------ | ----------------------- | --------------------------------------------- |
+| `monitor-schedule`             | scheduler               | monitor ID, monitor revision, correlation ID  |
+| `page-fetch` / `browser-fetch` | fetch or browser worker | monitor ID/revision, check ID, correlation ID |
+| `change-detection`             | change worker           | monitor ID/revision, check ID, correlation ID |
+| `notification`                 | notification worker     | outbox event ID, correlation ID               |
+| `digest`                       | notification worker     | user ID, digest-window start, correlation ID  |
+| `maintenance`                  | maintenance worker      | maintenance task, correlation ID              |
+
+The producer and consumer validate the same contract. Future incompatible payload changes require a new version rather than reinterpretation of queued data.
 
 ## Resource profile for 4 CPU / 8 GB
 

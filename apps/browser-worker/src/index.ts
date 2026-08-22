@@ -1,31 +1,48 @@
-import { Worker } from 'bullmq';
-import { Redis } from 'ioredis';
 import { createLogger, loadEnvironment } from '@pagepulse/config';
-import { QueueNames, type CheckJob } from '@pagepulse/contracts';
-const env = loadEnvironment();
-const log = createLogger('browser-worker', env.LOG_LEVEL);
-const connection = new Redis(env.REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
-const worker = new Worker<CheckJob>(
-  QueueNames.browserFetch,
-  (job) => {
-    log.info(
-      { jobId: job.id, monitorId: job.data.monitorId, correlationId: job.data.correlationId },
-      'placeholder browser check claimed',
-    );
-    return Promise.resolve({ status: 'not-implemented' });
-  },
-  {
+import {
+  createRedisConnection,
+  createValidatedWorker,
+  installGracefulShutdown,
+  QueueNames,
+} from '@pagepulse/queue';
+
+function startBrowserWorker() {
+  const environment = loadEnvironment();
+  const logger = createLogger('browser-worker', environment.LOG_LEVEL);
+  const connection = createRedisConnection(environment.REDIS_URL);
+  connection.on('error', (error) => logger.error({ error }, 'Redis connection failed'));
+
+  const worker = createValidatedWorker(
+    QueueNames.browserFetch,
     connection,
-    concurrency: env.BROWSER_CONCURRENCY_MIN,
-    prefix: env.QUEUE_PREFIX,
-  },
-);
-async function shutdown(signal: string) {
-  log.info({ signal }, 'shutting down');
-  await worker.close();
-  await connection.quit();
+    environment.QUEUE_PREFIX,
+    (job) => {
+      logger.info(
+        {
+          checkId: job.data.checkId,
+          correlationId: job.data.correlationId,
+          jobId: job.id,
+          monitorId: job.data.monitorId,
+        },
+        'Placeholder browser-fetch check claimed',
+      );
+      return Promise.resolve({ status: 'not-implemented' });
+    },
+    { concurrency: environment.BROWSER_CONCURRENCY_MIN },
+  );
+  worker.on('error', (error) => logger.error({ error }, 'Browser-fetch worker failed'));
+
+  installGracefulShutdown({
+    connection,
+    onFailure: (signal, error) => {
+      logger.error({ error, signal }, 'Browser-fetch worker shutdown failed');
+      process.exitCode = 1;
+    },
+    onStart: (signal) => logger.info({ signal }, 'Shutting down browser-fetch worker'),
+    resources: [worker],
+  });
+
+  return { connection, worker };
 }
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-process.on('SIGINT', () => void shutdown('SIGINT'));
+
+startBrowserWorker();
