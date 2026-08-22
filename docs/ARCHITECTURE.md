@@ -23,7 +23,8 @@ Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, 
 
 - `GET /health/live` is public and dependency-free. It confirms only that the API process can respond.
 - `GET /health/ready` concurrently probes MariaDB and Redis. It returns `200` only when both are reachable,
-  otherwise `503`, and never includes connection errors or configuration values.
+  otherwise `503`, and never includes connection errors or configuration values. Individual dependency probes are
+  bounded so a stalled connection reports degraded health promptly.
 - `GET /api/v1/system/version` is public and returns only the service name, application version and uptime.
 - `GET /api/v1/system/diagnostics` is not registered unless `OWNER_DIAGNOSTICS_TOKEN` is configured. It requires
   that token as a Bearer credential and returns safe dependency status labels only. Phase 2 owner-session
