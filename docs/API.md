@@ -41,3 +41,6 @@ PATs can access only their member’s resources and can never use owner routes, 
 - `GET /system/version` returns version and uptime only.
 
 Readiness and detailed diagnostics are not public through the gateway. Internal readiness is used by Compose/deployment health checks; owner diagnostics are authenticated and redacted.
+
+Owner bootstrap is deliberately CLI-only at this stage. The CLI creates a pending owner and emits an expiring
+setup URL; the authenticated redemption endpoint is introduced with the invitation and password flow in Phase 2 item 12.

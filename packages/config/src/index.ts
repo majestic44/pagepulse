@@ -26,6 +26,7 @@ const environmentSchema = z
     DEVTOOLS_PORT: z.coerce.number().int().min(1).max(65_535).default(4010),
     APP_VERSION: z.string().trim().min(1).max(128).default('0.0.0-dev'),
     APP_BASE_URL: z.url().optional(),
+    OWNER_SETUP_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(30),
     LOG_LEVEL: z.enum(logLevels).default('info'),
     DATABASE_URL: z.url().default('mysql://pagepulse:pagepulse@localhost:3306/pagepulse'),
     REDIS_URL: z.url().default('redis://localhost:6379/0'),

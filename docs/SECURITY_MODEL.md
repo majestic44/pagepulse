@@ -11,7 +11,12 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
 - Optional RFC 6238 TOTP with encrypted secret and hashed single-use recovery codes.
 - Server-side sessions with secure, HTTP-only, SameSite cookies, rotation after authentication changes, idle/absolute expiry, and revocation.
 - Rate limits for sign-in, reset, invitation, TOTP and PAT operations.
-- Owner bootstrap is a CLI-generated, expiring one-time URL.
+- Owner bootstrap is a CLI-generated, expiring one-time URL. The CLI creates the pending owner and its
+  256-bit setup token atomically while holding a MariaDB advisory lock. Only a SHA-256 digest is stored;
+  it prints the plaintext URL once to the invoking operator rather than to structured logs. The CLI refuses
+  once an active owner exists; before redemption, an operator can rotate a pending owner's unused token only
+  by supplying the same email. The token is valid for 30 minutes by default (5 minutes to 24 hours configured
+  through `OWNER_SETUP_TOKEN_TTL_MINUTES`) and Phase 2 invitation redemption will consume it once.
 
 ## Credential encryption
 
