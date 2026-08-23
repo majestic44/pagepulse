@@ -16,7 +16,7 @@ import {
   type QueueResource,
 } from '@pagepulse/queue';
 
-import { createSchedulerReconciler } from './scheduler.js';
+import { createSchedulerReconciler, runInitialSchedulerReconciliation } from './scheduler.js';
 
 const queueNamesByRole: Record<Environment['WORKER_ROLE'], ReadonlyArray<QueueName>> = {
   scheduler: [QueueNames.monitorSchedule],
@@ -50,6 +50,8 @@ async function startControlWorker() {
   });
 
   const resources: QueueResource[] = [...workers];
+  let logReconciliation: (() => Promise<void>) | undefined;
+  let reconciliationTimer: NodeJS.Timeout | undefined;
   if (role === 'scheduler') {
     const pool = createDatabasePool(environment.DATABASE_URL);
     const database = createDatabase(pool);
@@ -70,7 +72,7 @@ async function startControlWorker() {
       monitorScheduleQueue,
       notificationQueue,
     });
-    const logReconciliation = async () => {
+    logReconciliation = async () => {
       const result = await reconcile();
       logger.info(
         {
@@ -81,23 +83,17 @@ async function startControlWorker() {
         'Scheduler reconciliation completed',
       );
     };
-
-    await logReconciliation();
-    const reconciliationTimer = setInterval(() => {
-      void logReconciliation().catch((error: unknown) =>
-        logger.error({ error }, 'Scheduler reconciliation failed'),
-      );
-    }, environment.SCHEDULER_RECONCILIATION_INTERVAL_MS);
-    reconciliationTimer.unref();
     resources.push(monitorScheduleQueue, notificationQueue, {
       close: async () => {
-        clearInterval(reconciliationTimer);
+        if (reconciliationTimer) {
+          clearInterval(reconciliationTimer);
+        }
         await pool.end();
       },
     });
   }
 
-  installGracefulShutdown({
+  const shutdown = installGracefulShutdown({
     connection,
     onFailure: (signal, error) => {
       logger.error({ error, role, signal }, 'Control worker shutdown failed');
@@ -106,6 +102,16 @@ async function startControlWorker() {
     onStart: (signal) => logger.info({ role, signal }, 'Shutting down control worker'),
     resources,
   });
+
+  if (logReconciliation) {
+    await runInitialSchedulerReconciliation(logReconciliation, shutdown.shutdown);
+    reconciliationTimer = setInterval(() => {
+      void logReconciliation().catch((error: unknown) =>
+        logger.error({ error }, 'Scheduler reconciliation failed'),
+      );
+    }, environment.SCHEDULER_RECONCILIATION_INTERVAL_MS);
+    reconciliationTimer.unref();
+  }
 
   return { connection, workers };
 }

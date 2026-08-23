@@ -7,7 +7,7 @@ import {
   type QueueForName,
 } from '@pagepulse/queue';
 
-import { createSchedulerReconciler } from './scheduler.js';
+import { createSchedulerReconciler, runInitialSchedulerReconciliation } from './scheduler.js';
 
 const schedules: MonitorSchedule[] = [
   {
@@ -23,6 +23,16 @@ const events: PendingOutboxEvent[] = [
 ];
 
 describe('scheduler reconciliation service', () => {
+  it('shuts down allocated resources when initial reconciliation fails', async () => {
+    const startupError = new Error('MariaDB unavailable');
+    const reconcile = vi.fn().mockRejectedValue(startupError);
+    const shutdown = vi.fn().mockResolvedValue(undefined);
+
+    await expect(runInitialSchedulerReconciliation(reconcile, shutdown)).rejects.toBe(startupError);
+
+    expect(shutdown).toHaveBeenCalledWith('startup_failure');
+  });
+
   it('shares concurrent reconciliation requests and reconciles schedules and outbox events', async () => {
     const listActiveSchedules = vi.fn().mockResolvedValue(schedules);
     const listPendingOutboxEvents = vi.fn().mockResolvedValue(events);

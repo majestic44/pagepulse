@@ -20,6 +20,18 @@ export type SchedulerReconciliationRun = Readonly<{
   schedules: SchedulerReconciliationResult;
 }>;
 
+export async function runInitialSchedulerReconciliation(
+  reconcile: () => Promise<void>,
+  shutdown: (signal: string) => Promise<void>,
+) {
+  try {
+    await reconcile();
+  } catch (error) {
+    await shutdown('startup_failure');
+    throw error;
+  }
+}
+
 export function createSchedulerReconciler({
   listActiveSchedules,
   listPendingOutboxEvents,
