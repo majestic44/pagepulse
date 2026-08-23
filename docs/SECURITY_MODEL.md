@@ -6,17 +6,26 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
 
 ## Account security
 
-- Argon2id password hashes with configurable memory/time parameters.
-- Email verification and short-lived, single-use password reset tokens stored as hashes.
+- Native Node.js Argon2id password hashes with configurable memory, passes and parallelism. Passwords require at
+  least 12 characters; hash parameters are bounded by startup validation and encoded with each hash for future rehash.
+- Email verification and short-lived, single-use password reset tokens use 256 bits of entropy and are stored only as
+  SHA-256 digests. Issuing a replacement revokes the prior unused token of that type.
 - Optional RFC 6238 TOTP with encrypted secret and hashed single-use recovery codes.
 - Server-side sessions with secure, HTTP-only, SameSite cookies, rotation after authentication changes, idle/absolute expiry, and revocation.
 - Rate limits for sign-in, reset, invitation, TOTP and PAT operations.
+- Login, redemption/verification and reset rate-limit keys contain only a SHA-256 hash of the requester IP. Redis
+  rate-limit errors fail closed with a generic temporary-unavailable response; plaintext IP addresses are not stored
+  in the key or logged.
 - Owner bootstrap is a CLI-generated, expiring one-time URL. The CLI creates the pending owner and its
   256-bit setup token atomically while holding a MariaDB advisory lock. Only a SHA-256 digest is stored;
   it prints the plaintext URL once to the invoking operator rather than to structured logs. The CLI refuses
   once an active owner exists; before redemption, an operator can rotate a pending owner's unused token only
   by supplying the same email. The token is valid for 30 minutes by default (5 minutes to 24 hours configured
   through `OWNER_SETUP_TOKEN_TTL_MINUTES`) and Phase 2 invitation redemption will consume it once.
+
+Email and reset delivery are deferred until the notification platform work. Until then the API never returns,
+logs, queues or stores a recoverable verification/reset token, and deployments must not present the resulting
+verification or reset flow as deliverable to end users.
 
 ## Credential encryption
 

@@ -134,3 +134,45 @@ export const DiagnosticsResponse = Type.Object({
 export const UnauthorizedResponse = Type.Object({
   error: Type.Literal('Unauthorized'),
 });
+
+export const AuthenticationCredentials = Type.Object(
+  {
+    password: Type.String({ minLength: 1, maxLength: 4_096 }),
+    token: Type.String({ minLength: 1, maxLength: 256 }),
+  },
+  queuePayloadOptions,
+);
+
+export const LoginRequest = Type.Object(
+  {
+    email: Type.String({ minLength: 1, maxLength: 320 }),
+    password: Type.String({ minLength: 1, maxLength: 4_096 }),
+  },
+  queuePayloadOptions,
+);
+
+export const TokenRequest = Type.Object(
+  { token: Type.String({ minLength: 1, maxLength: 256 }) },
+  queuePayloadOptions,
+);
+
+export const PasswordResetRequest = Type.Object(
+  { email: Type.String({ minLength: 1, maxLength: 320 }) },
+  queuePayloadOptions,
+);
+
+export const AuthenticationAcceptedResponse = Type.Object({
+  status: Type.Union([Type.Literal('reset_requested'), Type.Literal('verification_required')]),
+});
+
+export const InvalidAuthenticationRequestResponse = Type.Object({
+  error: Type.Literal('Invalid authentication request'),
+});
+
+export const TooManyRequestsResponse = Type.Object({
+  error: Type.Literal('Too many authentication attempts'),
+});
+
+export const AuthenticationUnavailableResponse = Type.Object({
+  error: Type.Literal('Authentication temporarily unavailable'),
+});

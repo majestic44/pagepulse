@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 24+
+- Node.js 24.7+
 - pnpm 11+
 - Docker Engine and Compose v2
 - Git
@@ -69,7 +69,18 @@ The command requires `APP_BASE_URL` and `DATABASE_URL`, creates one pending owne
 owner completes setup, rerun it with the same email to revoke the prior unused URL and issue a replacement;
 it refuses after the owner becomes active. Treat the printed URL as a credential: do not run this command in
 CI or capture its output in logs. Configure `OWNER_SETUP_TOKEN_TTL_MINUTES` between 5 and 1,440 when a
-different lifetime is needed. Its redemption page and password setup arrive in Phase 2 item 12.
+different lifetime is needed. Redeem its token through `POST /api/v1/auth/owner-setup` with a password of at least
+12 characters. The response intentionally does not expose a verification token.
+
+## Authentication configuration
+
+The API uses Node's native Argon2id implementation. Keep `AUTH_ARGON2_MEMORY_KIB`,
+`AUTH_ARGON2_PARALLELISM` and `AUTH_ARGON2_PASSES` at their reviewed defaults unless a capacity review supports a
+change. Configure the verification/reset token lifetimes and bounded login, reset and redemption rate limits through
+the matching `AUTH_*` and `*_TOKEN_TTL_MINUTES` variables in `.env.example`.
+
+Email delivery is not part of this identity foundation. It is deferred to the Phase 5 provider work, so the current
+development stack cannot send verification or password-reset messages and never prints those token values to logs.
 
 ## Codex workflow
 
