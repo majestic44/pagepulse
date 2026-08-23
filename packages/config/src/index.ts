@@ -8,7 +8,6 @@ const workerRoles = ['scheduler', 'change-detection', 'notification', 'maintenan
 const secretFileVariables = [
   'DATABASE_URL',
   'REDIS_URL',
-  'OWNER_DIAGNOSTICS_TOKEN',
   'SESSION_SECRET',
   'COOKIE_ENCRYPTION_KEK',
   'CREDENTIAL_ENCRYPTION_KEK',
@@ -65,7 +64,6 @@ const environmentSchema = z
     LOG_LEVEL: z.enum(logLevels).default('info'),
     DATABASE_URL: z.url().default('mysql://pagepulse:pagepulse@localhost:3306/pagepulse'),
     REDIS_URL: z.url().default('redis://localhost:6379/0'),
-    OWNER_DIAGNOSTICS_TOKEN: z.string().trim().min(1).optional(),
     QUEUE_PREFIX: z.string().trim().min(1).max(64).default('pagepulse'),
     WORKER_ROLE: z.enum(workerRoles).default('scheduler'),
     SCHEDULER_RECONCILIATION_INTERVAL_MS: z.coerce

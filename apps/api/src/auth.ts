@@ -21,6 +21,7 @@ import {
 } from '@pagepulse/db';
 
 import type { SessionService } from './session.js';
+import type { MemberService } from './members.js';
 import type { TotpService } from './totp.js';
 
 export type AuthenticationTokenIssue = Readonly<{
@@ -162,6 +163,7 @@ export type AuthenticationRateLimitPolicies = Readonly<{
 }>;
 
 export type AuthenticationDependencies = Readonly<{
+  members: MemberService;
   rateLimitPolicies: AuthenticationRateLimitPolicies;
   rateLimitStore: RateLimitStore;
   service: AuthenticationService;

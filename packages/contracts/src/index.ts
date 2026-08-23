@@ -135,6 +135,14 @@ export const UnauthorizedResponse = Type.Object({
   error: Type.Literal('Unauthorized'),
 });
 
+export const ForbiddenResponse = Type.Object({
+  error: Type.Literal('Forbidden'),
+});
+
+export const NotFoundResponse = Type.Object({
+  error: Type.Literal('Not found'),
+});
+
 export const AuthenticationCredentials = Type.Object(
   {
     password: Type.String({ minLength: 1, maxLength: 4_096 }),
@@ -225,4 +233,32 @@ export const RecoveryCodesResponse = Type.Object({
     minItems: 1,
     maxItems: 20,
   }),
+});
+
+export const ManagedMemberStatus = Type.Union([
+  Type.Literal('active'),
+  Type.Literal('deleting'),
+  Type.Literal('invited'),
+  Type.Literal('suspended'),
+]);
+
+export const ManagedMemberSummary = Type.Object({
+  createdAt: Type.String({ format: 'date-time' }),
+  email: Type.String({ format: 'email', maxLength: 320 }),
+  emailVerified: Type.Boolean(),
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  monitorLimit: Type.Integer({ minimum: 0 }),
+  status: ManagedMemberStatus,
+});
+
+export const ManagedMembersResponse = Type.Object({
+  members: Type.Array(ManagedMemberSummary),
+});
+
+export const MemberIdParameters = Type.Object({
+  memberId: Type.String({ minLength: 1, maxLength: 36 }),
+});
+
+export const MemberLifecycleConflictResponse = Type.Object({
+  error: Type.Literal('Member lifecycle action cannot be completed'),
 });

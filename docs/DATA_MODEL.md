@@ -3,6 +3,9 @@
 ## Identity and authorization
 
 - `users`: email, password hash, verification state, timezone, theme, status, deletion deadline.
+- Member lifecycle uses the existing `users.status`: an owner may move an active member to `suspended` and later
+  restore that same member to `active`; owner-targeted lifecycle actions are rejected. Owner removal permanently
+  deletes a member and cascades member-owned records after revoking active sessions.
 - `owner_setup_tokens`: one SHA-256 token digest bound to the pending owner, with expiry, redemption and revocation timestamps. Plaintext setup tokens are never stored.
 - `roles`: fixed `owner` and `member` roles for v1.
 - `invitations`: SHA-256 token digest, inviter, canonical email, expiry, redemption and revocation state.

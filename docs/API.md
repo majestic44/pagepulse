@@ -40,7 +40,7 @@ PATs can access only their member’s resources and can never use owner routes, 
 - `GET /health/live`
 - `GET /system/version` returns version and uptime only.
 
-Readiness and detailed diagnostics are not public through the gateway. Internal readiness is used by Compose/deployment health checks; owner diagnostics are authenticated and redacted.
+Readiness and detailed diagnostics are not public through the gateway. Internal readiness is used by Compose/deployment health checks; owner diagnostics require an owner browser session and return only redacted status labels.
 
 Owner bootstrap is deliberately CLI-only at this stage. The CLI creates a pending owner and emits an expiring
 setup URL; the redemption endpoint is available with the invitation and password flow in Phase 2 item 12.
@@ -76,6 +76,15 @@ token.
   revokes all other sessions, and returns the replacement set exactly once.
 - `DELETE /api/v1/account/totp` accepts `{ code }` or `{ recoveryCode }` and disables the factor after proof, revoking
   all other sessions.
+- `GET /api/v1/owner/members` is owner-only and returns redeemed member administration details. It never returns
+  session, token, TOTP, or credential material.
+- `POST /api/v1/owner/members/{memberId}/suspend` is owner-only, transitions an active member to suspended, and
+  revokes every current browser session for that member.
+- `POST /api/v1/owner/members/{memberId}/reactivate` is owner-only and restores a suspended member to active.
+- `DELETE /api/v1/owner/members/{memberId}` is owner-only and permanently removes a member. The operation is
+  transactional, revokes current sessions first, and relies on foreign-key deletion for member-owned account records.
+- `GET /api/v1/system/diagnostics` now requires an owner browser session rather than the retired bootstrap bearer
+  token. Signed-out callers receive `401`; signed-in members receive `403`.
 - `POST /api/v1/auth/password-resets` accepts `{ email }` and always returns
   `202 { "status": "reset_requested" }`, preventing account enumeration.
 - `POST /api/v1/auth/password-resets/confirm` accepts `{ token, password }` and returns `204` on success.
@@ -90,6 +99,10 @@ rotated on successful login. Completing a password reset revokes all active sess
 TOTP uses RFC 6238 with six digits, SHA-1 and 30-second time steps. The validator accepts the current or immediately
 previous time step only and records successful time steps to prevent a code from being accepted twice. Enrollment and
 stored factors require `TOTP_ENCRYPTION_KEK`; absence of that secret fails TOTP operations closed with a generic 503.
+
+Member management is enforced at the API boundary, not only in the owner UI. Owners cannot use member lifecycle
+routes against owner accounts, and member sessions are invalidated by both suspension and removal. Security/admin
+audit events for those actions are the next Phase 2 item.
 
 Outbound email delivery is deliberately deferred to Phase 5. This foundation creates only token hashes and does not
 return, log, queue, or persist a recoverable plaintext token. Consequently, a deployment cannot complete email

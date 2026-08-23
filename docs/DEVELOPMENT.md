@@ -41,12 +41,9 @@ Starter images run as non-root users and provide container health checks. After 
 against it. API liveness is dependency-free; API readiness requires MariaDB and Redis. Worker checks require
 both a live worker process and Redis connectivity.
 
-Detailed dependency status is unavailable by default. Before owner sessions are implemented, configure
-`OWNER_DIAGNOSTICS_TOKEN` (or `OWNER_DIAGNOSTICS_TOKEN_FILE`) to enable the temporary owner diagnostics endpoint:
-
-```bash
-curl -H "Authorization: Bearer $OWNER_DIAGNOSTICS_TOKEN" http://127.0.0.1:8080/api/v1/system/diagnostics
-```
+Detailed dependency status is available only to an authenticated owner browser session at
+`/api/v1/system/diagnostics`. The former static diagnostics bearer token is retired; do not add it to local or
+production configuration.
 
 ## Fake targets
 

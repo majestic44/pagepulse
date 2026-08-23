@@ -72,9 +72,14 @@ The shared logger recursively redacts sensitive field names before serializing J
 domain, identifier or result class rather than a full URL, personal data or secret value.
 
 Public health endpoints expose only service/version/uptime and an aggregate readiness result. Detailed dependency
-status is available only when the temporary `OWNER_DIAGNOSTICS_TOKEN` Bearer guard is configured; it returns status
-labels and never connection errors, addresses, configuration values or queue payloads. Replace that bootstrap guard
-with owner-session authorization in Phase 2.
+status requires an authenticated owner browser session; it returns status labels only and never connection errors,
+addresses, configuration values or queue payloads. Member sessions receive `403`, and no static diagnostics bearer
+token remains configured.
+
+Owners can suspend active members only, which revokes every active browser session immediately. Reactivation restores
+the previous active state. Owner removal is limited to member accounts, revokes sessions before deletion, and relies
+on foreign keys to remove member-owned account records. The following Phase 2 item adds the retained audit trail for
+these lifecycle actions.
 
 ## Security gates
 

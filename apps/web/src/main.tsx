@@ -21,7 +21,7 @@ const milestones = [
   },
   {
     detail:
-      'Owner bootstrap, password sign-in, authenticator-app MFA and active-session controls are in place; access policies follow.',
+      'Owner bootstrap, password sign-in, authenticator-app MFA, active sessions and member lifecycle controls are in place.',
     label: 'Phase 2',
     status: 'In progress',
     title: 'Identity and administration',
@@ -53,6 +53,19 @@ type TotpEnrollment = Readonly<{
 }>;
 
 type FactorAction = 'disable' | 'replace-recovery-codes' | undefined;
+
+type ManagedMember = Readonly<{
+  createdAt: string;
+  email: string;
+  emailVerified: boolean;
+  id: string;
+  monitorLimit: number;
+  status: 'active' | 'deleting' | 'invited' | 'suspended';
+}>;
+
+type OwnerMembersState =
+  | Readonly<{ kind: 'forbidden' | 'loading' | 'signed-out' }>
+  | Readonly<{ kind: 'ready'; members: ReadonlyArray<ManagedMember> }>;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -572,6 +585,180 @@ function AccountSessions() {
   );
 }
 
+function OwnerMembers() {
+  const [state, setState] = useState<OwnerMembersState>({ kind: 'loading' });
+  const [message, setMessage] = useState<string>();
+  const [submitting, setSubmitting] = useState<string>();
+
+  const loadMembers = useCallback(async () => {
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/owner/members', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        setState({ kind: 'signed-out' });
+        return;
+      }
+      if (response.status === 403) {
+        setState({ kind: 'forbidden' });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to load members');
+      }
+      const payload = (await response.json()) as { members: ReadonlyArray<ManagedMember> };
+      setState({ kind: 'ready', members: payload.members });
+    } catch {
+      setMessage('Member administration is temporarily unavailable. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMembers();
+  }, [loadMembers]);
+
+  async function manageMember(member: ManagedMember, action: 'reactivate' | 'remove' | 'suspend') {
+    if (
+      action === 'remove' &&
+      !window.confirm(
+        `Permanently remove ${member.email}? Their current sessions will end and this cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setSubmitting(`${action}:${member.id}`);
+    setMessage(undefined);
+    try {
+      const response = await fetch(
+        action === 'remove'
+          ? `/api/v1/owner/members/${encodeURIComponent(member.id)}`
+          : `/api/v1/owner/members/${encodeURIComponent(member.id)}/${action}`,
+        {
+          credentials: 'same-origin',
+          method: action === 'remove' ? 'DELETE' : 'POST',
+        },
+      );
+      if (response.status === 409) {
+        setMessage(
+          'That member changed state before this action could finish. Refresh and try again.',
+        );
+        await loadMembers();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to update member');
+      }
+      setMessage(
+        action === 'suspend'
+          ? 'Member suspended and active sessions ended.'
+          : action === 'reactivate'
+            ? 'Member reactivated.'
+            : 'Member permanently removed.',
+      );
+      await loadMembers();
+    } catch {
+      setMessage('The member action could not be completed. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  if (state.kind === 'loading') {
+    return (
+      <main className="shell account-shell" aria-live="polite">
+        <p className="eyebrow">OWNER ADMINISTRATION</p>
+        <h1>Checking member access…</h1>
+      </main>
+    );
+  }
+
+  if (state.kind !== 'ready') {
+    const signedOut = state.kind === 'signed-out';
+    return (
+      <main className="shell account-shell">
+        <a className="back-link" href="/">
+          ← Project status
+        </a>
+        <p className="eyebrow">OWNER ADMINISTRATION</p>
+        <h1>
+          {signedOut ? 'Sign in as an owner to manage members.' : 'Owner access is required.'}
+        </h1>
+        <p className="account-intro">
+          {signedOut
+            ? 'Use Account security to create a browser session, then return here.'
+            : 'Member accounts cannot view or change other member accounts.'}
+        </p>
+        {signedOut ? (
+          <a className="account-link inline-link" href="/account/sessions">
+            Go to Account security
+          </a>
+        ) : null}
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">OWNER ADMINISTRATION</p>
+      <h1>Members</h1>
+      <p className="account-intro">
+        Suspend an active member to end every current browser session. Reactivation restores access;
+        removal permanently deletes the member and their account data.
+      </p>
+      <ol className="member-list" aria-live="polite">
+        {state.members.map((member) => (
+          <li key={member.id}>
+            <div>
+              <div className="session-heading">
+                <h2>{member.email}</h2>
+                <strong>{member.status}</strong>
+              </div>
+              <p>{member.emailVerified ? 'Email verified' : 'Email verification pending'}</p>
+              <p>Joined {formatDate(member.createdAt)}</p>
+              <p>{member.monitorLimit} monitor limit</p>
+            </div>
+            <div className="member-actions">
+              {member.status === 'active' ? (
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => void manageMember(member, 'suspend')}
+                  type="button"
+                >
+                  Suspend
+                </button>
+              ) : member.status === 'suspended' ? (
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => void manageMember(member, 'reactivate')}
+                  type="button"
+                >
+                  Reactivate
+                </button>
+              ) : null}
+              <button
+                className="danger-button"
+                disabled={submitting !== undefined}
+                onClick={() => void manageMember(member, 'remove')}
+                type="button"
+              >
+                Remove member
+              </button>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {state.members.length === 0 ? (
+        <p className="account-intro">No redeemed member accounts are available yet.</p>
+      ) : null}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+    </main>
+  );
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem('pagepulse-theme') as Theme | null) ?? 'light',
@@ -589,6 +776,9 @@ function App() {
         <a className="account-link" href="/account/sessions">
           Account security
         </a>
+        <a className="account-link" href="/owner/members">
+          Member administration
+        </a>
         <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
           Use {theme === 'light' ? 'dark' : 'light'} theme
         </button>
@@ -603,8 +793,8 @@ function App() {
         </p>
         <p className="status-note">
           Verification and password-reset delivery are deliberately deferred until the notification
-          platform is ready. Authenticator-app MFA and active-session controls are now available;
-          monitoring screens follow.
+          platform is ready. Authenticator-app MFA, active-session and owner member controls are now
+          available; monitoring screens follow.
         </p>
       </section>
 
@@ -631,15 +821,20 @@ function App() {
         <p className="eyebrow">UP NEXT</p>
         <h2 id="next-title">Finish identity, then begin monitor configuration.</h2>
         <p>
-          Authorization policies and account recovery are the next identity work. Monitor creation
-          and page-change detection begin in Phase 3 once those access controls are complete.
+          Account recovery and audit history are the remaining identity work. Monitor creation and
+          page-change detection begin in Phase 3 once those access controls are complete.
         </p>
       </section>
     </main>
   );
 }
 
-const Page = window.location.pathname === '/account/sessions' ? AccountSessions : App;
+const Page =
+  window.location.pathname === '/account/sessions'
+    ? AccountSessions
+    : window.location.pathname === '/owner/members'
+      ? OwnerMembers
+      : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

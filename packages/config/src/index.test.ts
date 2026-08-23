@@ -110,17 +110,6 @@ describe('loadEnvironment', () => {
     expect(environment.REDIS_URL).toBe('redis://:secret@redis:6379/0');
   });
 
-  it('loads the owner diagnostics token from a file', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'pagepulse-config-'));
-    temporaryDirectories.push(directory);
-    const secretPath = join(directory, 'owner-diagnostics-token');
-    await writeFile(secretPath, 'diagnostics-token\n');
-
-    const environment = loadEnvironment({ OWNER_DIAGNOSTICS_TOKEN_FILE: secretPath });
-
-    expect(environment.OWNER_DIAGNOSTICS_TOKEN).toBe('diagnostics-token');
-  });
-
   it('rejects ambiguous direct and file-backed secrets', () => {
     expect(() =>
       loadEnvironment({
