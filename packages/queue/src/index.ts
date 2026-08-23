@@ -9,7 +9,12 @@ import {
 import { Value } from '@sinclair/typebox/value';
 import { Redis } from 'ioredis';
 
-import { QueuePayloadSchemas, type QueueName, type QueuePayloadByName } from '@pagepulse/contracts';
+import {
+  QueueNames,
+  QueuePayloadSchemas,
+  type QueueName,
+  type QueuePayloadByName,
+} from '@pagepulse/contracts';
 
 export { QueueNames, type QueueName, type QueuePayloadByName } from '@pagepulse/contracts';
 
@@ -34,10 +39,10 @@ export type QueuePayloadValidationIssue = Readonly<{
 export type QueueForName<Name extends QueueName> = Queue<
   QueuePayloadByName[Name],
   unknown,
-  Name,
+  string,
   QueuePayloadByName[Name],
   unknown,
-  Name
+  string
 >;
 
 export class QueuePayloadValidationError extends Error {
@@ -95,10 +100,10 @@ export function createQueue<Name extends QueueName>(
   return new Queue<
     QueuePayloadByName[Name],
     unknown,
-    Name,
+    string,
     QueuePayloadByName[Name],
     unknown,
-    Name
+    string
   >(queueName, {
     ...options,
     connection,
@@ -113,6 +118,131 @@ export async function enqueueJob<Name extends QueueName>(
   options?: JobsOptions,
 ) {
   return queue.add(queueName, parseQueuePayload(queueName, payload), options);
+}
+
+export type PendingNotificationOutboxEvent = Readonly<{
+  correlationId: string;
+  eventType: 'notification';
+  id: string;
+}>;
+
+export function notificationOutboxJobId(eventId: string) {
+  return `outbox-${Buffer.from(eventId).toString('base64url')}`;
+}
+
+export async function publishPendingNotificationOutboxEvents(
+  queue: QueueForName<typeof QueueNames.notification>,
+  events: ReadonlyArray<PendingNotificationOutboxEvent>,
+  markPublished: (eventId: string) => Promise<unknown>,
+) {
+  let published = 0;
+  for (const event of events) {
+    await enqueueJob(
+      QueueNames.notification,
+      queue,
+      {
+        correlationId: event.correlationId,
+        outboxEventId: event.id,
+        version: 1,
+      },
+      { jobId: notificationOutboxJobId(event.id) },
+    );
+    await markPublished(event.id);
+    published += 1;
+  }
+  return published;
+}
+
+export const MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS = 3_600_000;
+const monitorSchedulerIdPrefix = 'monitor-';
+
+export type MonitorScheduleDefinition = Readonly<{
+  correlationId: string;
+  everyMilliseconds: number;
+  monitorId: string;
+  monitorRevision: number;
+}>;
+
+export type SchedulerReconciliationResult = Readonly<{
+  removed: number;
+  upserted: number;
+}>;
+
+export class MonitorScheduleValidationError extends Error {
+  constructor(message: string) {
+    super(`Invalid monitor schedule: ${message}`);
+    this.name = 'MonitorScheduleValidationError';
+  }
+}
+
+export function monitorJobSchedulerId({ monitorId, monitorRevision }: MonitorScheduleDefinition) {
+  return `${monitorSchedulerIdPrefix}${Buffer.from(monitorId).toString('base64url')}-r${monitorRevision}`;
+}
+
+function validateMonitorSchedule(schedule: MonitorScheduleDefinition) {
+  parseQueuePayload(QueueNames.monitorSchedule, {
+    correlationId: schedule.correlationId,
+    monitorId: schedule.monitorId,
+    monitorRevision: schedule.monitorRevision,
+    version: 1,
+  });
+  if (
+    !Number.isSafeInteger(schedule.everyMilliseconds) ||
+    schedule.everyMilliseconds < MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS
+  ) {
+    throw new MonitorScheduleValidationError(
+      `everyMilliseconds must be an integer of at least ${MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS}`,
+    );
+  }
+}
+
+export async function reconcileMonitorSchedules(
+  queue: QueueForName<typeof QueueNames.monitorSchedule>,
+  schedules: ReadonlyArray<MonitorScheduleDefinition>,
+): Promise<SchedulerReconciliationResult> {
+  const desiredScheduleIds = new Set<string>();
+  for (const schedule of schedules) {
+    validateMonitorSchedule(schedule);
+    const scheduleId = monitorJobSchedulerId(schedule);
+    if (desiredScheduleIds.has(scheduleId)) {
+      throw new MonitorScheduleValidationError('duplicate monitor and revision');
+    }
+    desiredScheduleIds.add(scheduleId);
+  }
+
+  let upserted = 0;
+  for (const schedule of schedules) {
+    await queue.upsertJobScheduler(
+      monitorJobSchedulerId(schedule),
+      { every: schedule.everyMilliseconds },
+      {
+        data: {
+          correlationId: schedule.correlationId,
+          monitorId: schedule.monitorId,
+          monitorRevision: schedule.monitorRevision,
+          version: 1,
+        },
+        name: QueueNames.monitorSchedule,
+        opts: { removeOnComplete: 1_000, removeOnFail: 1_000 },
+      },
+    );
+    upserted += 1;
+  }
+
+  const existingSchedulers = await queue.getJobSchedulers();
+  const staleScheduleIds = existingSchedulers.flatMap((scheduler) => {
+    const scheduleId = scheduler.id;
+    return typeof scheduleId === 'string' &&
+      scheduleId.startsWith(monitorSchedulerIdPrefix) &&
+      !desiredScheduleIds.has(scheduleId)
+      ? [scheduleId]
+      : [];
+  });
+  for (const scheduleId of staleScheduleIds) {
+    await queue.removeJobScheduler(scheduleId);
+  }
+
+  return { removed: staleScheduleIds.length, upserted };
 }
 
 export function validateClaimedJob<Name extends QueueName, Result>(

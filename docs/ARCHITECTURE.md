@@ -51,8 +51,8 @@ Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, 
 - Redis jobs are replayable. Jobs use deterministic IDs and are idempotent.
 - Queue messages are TypeBox-validated versioned payloads containing IDs and correlation metadata only; credentials, cookies, secrets and fetched content are rejected.
 - Workers stop claiming jobs before their Redis connection is closed, allowing BullMQ to finish active jobs during `SIGTERM`/`SIGINT` shutdown.
-- Transactional outbox rows bridge MariaDB commits to BullMQ.
-- Scheduler reconciliation repairs Redis after restart or data loss.
+- Transactional outbox rows bridge MariaDB commits to BullMQ. A publisher marks a row published only after BullMQ accepts its deterministic notification job ID, so a crash can cause an at-least-once retry but cannot lose a committed event; notification consumers must remain idempotent.
+- Scheduler reconciliation reads active, revision-matching `monitor_schedules` rows from MariaDB and upserts their deterministic BullMQ Job Schedulers. It removes only stale schedulers with the PagePulse-owned key prefix, repairing Redis after restart or data loss without deleting unrelated jobs.
 - File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
 
 ## Queue contracts

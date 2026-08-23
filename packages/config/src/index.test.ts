@@ -29,7 +29,24 @@ describe('loadEnvironment', () => {
       PORT: 4011,
       HTTP_FETCH_CONCURRENCY: 3,
       REDIS_URL: 'redis://localhost:6379/0',
+      SCHEDULER_RECONCILIATION_INTERVAL_MS: 300_000,
     });
+  });
+
+  it('rejects an unsafe scheduler reconciliation interval', () => {
+    let validationError: EnvironmentValidationError | undefined;
+    try {
+      loadEnvironment({ SCHEDULER_RECONCILIATION_INTERVAL_MS: '59999' });
+    } catch (error) {
+      if (error instanceof EnvironmentValidationError) {
+        validationError = error;
+      }
+    }
+
+    expect(validationError).toBeInstanceOf(EnvironmentValidationError);
+    expect(validationError?.issues).toContainEqual(
+      expect.objectContaining({ path: ['SCHEDULER_RECONCILIATION_INTERVAL_MS'] }),
+    );
   });
 
   it('loads a secret from a file and removes all trailing whitespace', async () => {
