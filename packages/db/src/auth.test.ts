@@ -147,6 +147,38 @@ describe('authentication persistence', () => {
     expect(query).toHaveBeenCalledOnce();
   });
 
+  it('revokes all sessions after resetting a verified account password', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [
+          {
+            emailVerifiedAt: now,
+            expiresAt: future,
+            revokedAt: null,
+            status: 'active',
+            tokenId: 'reset-token-id',
+            usedAt: null,
+            userId: 'member-id',
+          },
+        ],
+        [],
+      ])
+      .mockResolvedValue([[], []]);
+    const { connection } = createConnection(query);
+
+    await resetPassword(
+      connection,
+      { passwordHash: 'new-digest', resetTokenHash: 'reset-digest' },
+      now,
+    );
+
+    expect(query).toHaveBeenCalledWith(
+      'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
+      [now, 'member-id'],
+    );
+  });
+
   it('validates user roles returned from the database', async () => {
     const query = vi.fn().mockResolvedValue([
       [

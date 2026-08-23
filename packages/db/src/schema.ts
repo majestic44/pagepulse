@@ -81,6 +81,32 @@ export const accountTokens = mysqlTable(
   ],
 );
 
+export const sessions = mysqlTable(
+  'sessions',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    userId: varchar('user_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    deviceLabel: varchar('device_label', { length: 160 }).notNull(),
+    lastUsedAt: timestamp('last_used_at').notNull(),
+    idleExpiresAt: timestamp('idle_expires_at').notNull(),
+    absoluteExpiresAt: timestamp('absolute_expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('sessions_user_active_idx').on(
+      table.userId,
+      table.revokedAt,
+      table.idleExpiresAt,
+      table.absoluteExpiresAt,
+      table.lastUsedAt,
+    ),
+  ],
+);
+
 export const monitors = mysqlTable(
   'monitors',
   {

@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PasswordValidationError, type RateLimitStore } from '@pagepulse/auth';
 import { loadEnvironment } from '@pagepulse/config';
+import type { ActiveSession, AuthenticationUser } from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
+import type { SessionService } from './session.js';
 
 let app: Awaited<ReturnType<typeof buildApp>> | undefined;
 afterEach(async () => app?.close());
@@ -13,6 +15,7 @@ function createAuthenticationDependencies(
   rateLimitStore: RateLimitStore = {
     increment: vi.fn().mockResolvedValue({ count: 1, ttlMs: 60_000 }),
   },
+  sessions: Partial<SessionService> = {},
 ): AuthenticationDependencies {
   return {
     rateLimitPolicies: {
@@ -24,7 +27,7 @@ function createAuthenticationDependencies(
     service: {
       completePasswordReset: vi.fn().mockResolvedValue(undefined),
       confirmEmailVerification: vi.fn().mockResolvedValue(undefined),
-      login: vi.fn().mockResolvedValue(false),
+      login: vi.fn().mockResolvedValue(undefined),
       redeemInvitation: vi.fn().mockResolvedValue({
         expiresAt: new Date('2026-08-24T00:00:00.000Z'),
         token: 'verification-token-must-not-be-returned',
@@ -36,8 +39,41 @@ function createAuthenticationDependencies(
       requestPasswordReset: vi.fn().mockResolvedValue(undefined),
       ...service,
     },
+    sessions: {
+      authenticate: vi.fn().mockResolvedValue(undefined),
+      issue: vi.fn().mockResolvedValue({
+        expiresAt: new Date('2026-09-22T00:00:00.000Z'),
+        token: 'A'.repeat(43),
+      }),
+      list: vi.fn().mockResolvedValue([]),
+      revoke: vi.fn().mockResolvedValue(false),
+      revokeByToken: vi.fn().mockResolvedValue(undefined),
+      revokeOthers: vi.fn().mockResolvedValue(undefined),
+      ...sessions,
+    },
   };
 }
+
+const authenticatedUser: AuthenticationUser = {
+  email: 'owner@example.test',
+  emailVerified: true,
+  id: 'owner-id',
+  passwordHash: 'argon2id$password-digest',
+  role: 'owner',
+  status: 'active',
+};
+
+const activeSession: ActiveSession = {
+  absoluteExpiresAt: new Date('2026-09-22T00:00:00.000Z'),
+  createdAt: new Date('2026-08-23T00:00:00.000Z'),
+  deviceLabel: 'Chrome on Windows',
+  email: authenticatedUser.email,
+  id: 'session-id',
+  idleExpiresAt: new Date('2026-08-23T08:00:00.000Z'),
+  lastUsedAt: new Date('2026-08-23T00:00:00.000Z'),
+  role: 'owner',
+  userId: authenticatedUser.id,
+};
 
 describe('health contract', () => {
   it('returns liveness without probing dependencies', async () => {
@@ -245,9 +281,9 @@ describe('authentication contract', () => {
     expect(response.body).not.toContain('at least 12');
   });
 
-  it('does not create a session until the next identity item implements sessions', async () => {
+  it('issues an HTTP-only strict session cookie after login', async () => {
     const authentication = createAuthenticationDependencies({
-      login: vi.fn().mockResolvedValue(true),
+      login: vi.fn().mockResolvedValue(authenticatedUser),
     });
     const testApp = await buildApp({ authentication });
     app = testApp;
@@ -259,6 +295,59 @@ describe('authentication contract', () => {
     });
 
     expect(response.statusCode).toBe(204);
-    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(response.headers['set-cookie']).toContain('pagepulse_session=');
+    expect(response.headers['set-cookie']).toContain('HttpOnly');
+    expect(response.headers['set-cookie']).toContain('SameSite=Strict');
+    expect(authentication.sessions.issue).toHaveBeenCalledWith(
+      { deviceLabel: 'Unknown browser on unknown device', userId: authenticatedUser.id },
+      undefined,
+    );
+  });
+
+  it('lists the current active session without exposing its token', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(activeSession),
+      list: vi.fn().mockResolvedValue([activeSession]),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/account/sessions',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      sessions: [
+        expect.objectContaining({
+          current: true,
+          deviceLabel: 'Chrome on Windows',
+          id: 'session-id',
+        }),
+      ],
+    });
+    expect(response.body).not.toContain('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('revokes the current session and clears its cookie', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(activeSession),
+      revoke: vi.fn().mockResolvedValue(true),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'DELETE',
+      url: '/api/v1/account/sessions/session-id',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['set-cookie']).toContain('Max-Age=0');
+    expect(authentication.sessions.revoke).toHaveBeenCalledWith('owner-id', 'session-id');
   });
 });

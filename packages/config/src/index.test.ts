@@ -67,6 +67,21 @@ describe('loadEnvironment', () => {
     );
   });
 
+  it('rejects an idle session lifetime longer than the absolute lifetime', () => {
+    let validationError: EnvironmentValidationError | undefined;
+    try {
+      loadEnvironment({ SESSION_ABSOLUTE_TTL_MINUTES: '60', SESSION_IDLE_TTL_MINUTES: '61' });
+    } catch (error) {
+      if (error instanceof EnvironmentValidationError) {
+        validationError = error;
+      }
+    }
+
+    expect(validationError?.issues).toContainEqual(
+      expect.objectContaining({ path: ['SESSION_IDLE_TTL_MINUTES'] }),
+    );
+  });
+
   it('rejects an unsafe scheduler reconciliation interval', () => {
     let validationError: EnvironmentValidationError | undefined;
     try {

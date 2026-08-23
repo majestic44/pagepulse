@@ -11,7 +11,10 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
 - Email verification and short-lived, single-use password reset tokens use 256 bits of entropy and are stored only as
   SHA-256 digests. Issuing a replacement revokes the prior unused token of that type.
 - Optional RFC 6238 TOTP with encrypted secret and hashed single-use recovery codes.
-- Server-side sessions with secure, HTTP-only, SameSite cookies, rotation after authentication changes, idle/absolute expiry, and revocation.
+- Server-side sessions use 256-bit opaque cookies stored only as SHA-256 digests in MariaDB. Cookies are host-only,
+  HTTP-only and `SameSite=Strict`; production cookies are also `Secure`. Successful login replaces the prior browser
+  session, password reset revokes all sessions, and members can revoke individual or all other active sessions.
+  Sessions expire after eight idle hours and always within 30 days by default; both bounds are validated configuration.
 - Rate limits for sign-in, reset, invitation, TOTP and PAT operations.
 - Login, redemption/verification and reset rate-limit keys contain only a SHA-256 hash of the requester IP. Redis
   rate-limit errors fail closed with a generic temporary-unavailable response; plaintext IP addresses are not stored

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Type } from '@sinclair/typebox';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import {
   AuthRateLimitExceededError,
@@ -16,8 +16,10 @@ import {
   AuthenticationTokenError,
   createDatabasePool,
   probeDatabase,
+  type ActiveSession,
 } from '@pagepulse/db';
 import {
+  ActiveSessionsResponse,
   AuthenticationAcceptedResponse,
   AuthenticationUnavailableResponse,
   AuthenticationCredentials,
@@ -26,6 +28,7 @@ import {
   InvalidAuthenticationRequestResponse,
   LoginRequest,
   PasswordResetRequest,
+  SessionIdParameters,
   TokenRequest,
   TooManyRequestsResponse,
   UnauthorizedResponse,
@@ -38,6 +41,13 @@ import {
   type AuthenticationRateLimitPolicies,
 } from './auth.js';
 import { createHealthService, type HealthService } from './health.js';
+import {
+  clearSessionCookie,
+  createSessionService,
+  deviceLabel,
+  readSessionCookie,
+  serializeSessionCookie,
+} from './session.js';
 
 export type BuildAppOptions = Readonly<{
   authentication?: AuthenticationDependencies;
@@ -101,6 +111,13 @@ async function createDefaultAuthenticationDependencies(
       rateLimitPolicies: authenticationRateLimitPolicies(environment),
       rateLimitStore: new RedisFixedWindowRateLimitStore(redis),
       service,
+      sessions: createSessionService({
+        pool,
+        timing: {
+          absoluteTtlMinutes: environment.SESSION_ABSOLUTE_TTL_MINUTES,
+          idleTtlMinutes: environment.SESSION_IDLE_TTL_MINUTES,
+        },
+      }),
     };
   } catch (error) {
     await Promise.allSettled([pool.end(), redis.quit()]);
@@ -134,6 +151,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
   };
   app.addHook('onClose', async () => {
     await defaultAuthentication?.close();
+  });
+  app.addHook('onRequest', async (request, reply) => {
+    if (
+      request.url.startsWith('/api/v1/auth/') ||
+      request.url.startsWith('/api/v1/account/sessions')
+    ) {
+      reply.header('Cache-Control', 'no-store');
+    }
   });
   const serviceHealth = (status: 'ok' | 'degraded') => ({
     status,
@@ -211,6 +236,37 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return undefined;
       }
       throw error;
+    }
+  }
+
+  const sessionCookieIsSecure = env.NODE_ENV === 'production';
+  const serializeSession = (session: ActiveSession) => ({
+    absoluteExpiresAt: session.absoluteExpiresAt.toISOString(),
+    createdAt: session.createdAt.toISOString(),
+    deviceLabel: session.deviceLabel,
+    id: session.id,
+    idleExpiresAt: session.idleExpiresAt.toISOString(),
+    lastUsedAt: session.lastUsedAt.toISOString(),
+  });
+
+  async function getCurrentSession(request: FastifyRequest, reply: FastifyReply) {
+    const token = readSessionCookie(request.headers.cookie);
+    if (!token) {
+      reply.code(401).send({ error: 'Unauthorized' });
+      return undefined;
+    }
+    try {
+      const authentication = await getAuthentication();
+      const session = await authentication.sessions.authenticate(token);
+      if (!session) {
+        reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
+        reply.code(401).send({ error: 'Unauthorized' });
+        return undefined;
+      }
+      return { authentication, session, token };
+    } catch {
+      reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      return undefined;
     }
   }
 
@@ -330,13 +386,31 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        const authenticated = await authentication.service.login(
-          request.body.email,
-          request.body.password,
-        );
-        return authenticated
-          ? reply.code(204).send()
-          : reply.code(401).send({ error: 'Unauthorized' });
+        const user = await authentication.service.login(request.body.email, request.body.password);
+        if (!user) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        try {
+          const issued = await authentication.sessions.issue(
+            {
+              deviceLabel: deviceLabel(request.headers['user-agent']),
+              userId: user.id,
+            },
+            readSessionCookie(request.headers.cookie),
+          );
+          reply.header(
+            'Set-Cookie',
+            serializeSessionCookie(
+              issued.token,
+              issued.expiresAt,
+              new Date(now()),
+              sessionCookieIsSecure,
+            ),
+          );
+          return reply.code(204).send();
+        } catch {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
       } catch {
         return reply.code(401).send({ error: 'Unauthorized' });
       }
@@ -398,6 +472,121 @@ export async function buildApp(options: BuildAppOptions = {}) {
           return reply.code(400).send(invalidAuthenticationResponse);
         }
         throw error;
+      }
+    },
+  );
+
+  app.post(
+    '/api/v1/auth/logout',
+    {
+      schema: {
+        response: {
+          204: Type.Null(),
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const token = readSessionCookie(request.headers.cookie);
+      if (token) {
+        try {
+          const authentication = await getAuthentication();
+          await authentication.sessions.revokeByToken(token);
+        } catch {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
+      }
+      reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
+      return reply.code(204).send();
+    },
+  );
+
+  app.get(
+    '/api/v1/account/sessions',
+    {
+      schema: {
+        response: {
+          200: ActiveSessionsResponse,
+          401: UnauthorizedResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const sessions = await current.authentication.sessions.list(current.session.userId);
+        return {
+          sessions: sessions.map((session) => ({
+            ...serializeSession(session),
+            current: session.id === current.session.id,
+          })),
+        };
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.delete<{ Params: { sessionId: string } }>(
+    '/api/v1/account/sessions/:sessionId',
+    {
+      schema: {
+        params: SessionIdParameters,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const revoked = await current.authentication.sessions.revoke(
+          current.session.userId,
+          request.params.sessionId,
+        );
+        if (revoked && request.params.sessionId === current.session.id) {
+          reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
+        }
+        return reply.code(204).send();
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post(
+    '/api/v1/account/sessions/revoke-others',
+    {
+      schema: {
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        await current.authentication.sessions.revokeOthers(
+          current.session.userId,
+          current.session.id,
+        );
+        return reply.code(204).send();
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
       }
     },
   );

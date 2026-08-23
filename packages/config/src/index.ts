@@ -53,6 +53,8 @@ const environmentSchema = z
       .min(1_000)
       .max(86_400_000)
       .default(3_600_000),
+    SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(5).max(10_080).default(480),
+    SESSION_ABSOLUTE_TTL_MINUTES: z.coerce.number().int().min(60).max(43_200).default(43_200),
     LOG_LEVEL: z.enum(logLevels).default('info'),
     DATABASE_URL: z.url().default('mysql://pagepulse:pagepulse@localhost:3306/pagepulse'),
     REDIS_URL: z.url().default('redis://localhost:6379/0'),
@@ -95,6 +97,13 @@ const environmentSchema = z
         code: 'custom',
         message: 'AUTH_ARGON2_MEMORY_KIB must be at least 8 times AUTH_ARGON2_PARALLELISM',
         path: ['AUTH_ARGON2_MEMORY_KIB'],
+      });
+    }
+    if (environment.SESSION_IDLE_TTL_MINUTES > environment.SESSION_ABSOLUTE_TTL_MINUTES) {
+      context.addIssue({
+        code: 'custom',
+        message: 'SESSION_IDLE_TTL_MINUTES must not exceed SESSION_ABSOLUTE_TTL_MINUTES',
+        path: ['SESSION_IDLE_TTL_MINUTES'],
       });
     }
     if (environment.NODE_ENV === 'production' && environment.APP_BASE_URL?.startsWith('http://')) {
