@@ -54,3 +54,7 @@ Rules are pure, versioned functions with fixture tests. A rule revision establis
 - Deterministic scheduler key contains monitor ID and schedule revision.
 - Jobs include jitter to avoid synchronized checks.
 - Missed runs collapse into one catch-up check rather than a burst.
+
+The Phase 1 scheduler foundation stores a bounded interval and monitor revision in MariaDB, then uses deterministic
+BullMQ Job Scheduler IDs during reconciliation. Phase 3 will extend this internal registry with member-selected
+hourly/daily/custom schedules, IANA timezones and DST-safe resolution rather than changing Redis directly.

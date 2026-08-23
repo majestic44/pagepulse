@@ -13,6 +13,7 @@
 
 - `credential_profiles`: owner, domain hints, encrypted envelope payload, key version and status.
 - `monitors`: owner, URL, source type, fetch mode, schedule, timezone, state, revision, next due and failure counters.
+- `monitor_schedules`: internal authoritative scheduler registry keyed by monitor and revision, with a bounded interval and correlation ID. Phase 3 will own member-facing schedule, timezone and DST configuration.
 - `monitor_targets`: whole page, selector, repeated-list configuration or visual locator.
 - `monitor_rules`: rule type and versioned configuration.
 - `monitor_ignore_rules`: selectors, normalized patterns and built-in noise flags.
@@ -28,7 +29,7 @@
 - `alert_endpoints`: encrypted provider configuration and verification state.
 - `alert_deliveries`: event, endpoint, attempt, outcome, next retry and response classification.
 - `webhook_idempotency`: member/token/key/request hash/result/expiry.
-- `outbox_events`: committed domain events awaiting queue publication.
+- `outbox_events`: identifier-only committed domain events awaiting queue publication. They record event type, subject identifiers, correlation ID, availability and publication state; they never store fetched content or secrets.
 - `audit_events`: actor, action, safe target identifiers, IP hash, request ID and retention deadline.
 - `system_settings`: owner-configurable limits and retention with revision/audit metadata.
 

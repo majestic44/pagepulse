@@ -18,6 +18,10 @@ Configuration is validated at startup. In production, sensitive configuration su
 mounts through `<VARIABLE>_FILE` (for example, `DATABASE_URL_FILE=/run/secrets/database_url`); do not set both
 the direct value and its `_FILE` form. Logs are structured JSON and redact sensitive keys recursively.
 
+The scheduler reconciles MariaDB-backed monitor schedules and pending outbox rows every five minutes by default.
+Set `SCHEDULER_RECONCILIATION_INTERVAL_MS` to a value between 60 seconds and one hour when a different recovery
+cadence is needed.
+
 ## Commands
 
 ```bash

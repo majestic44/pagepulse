@@ -32,6 +32,12 @@ const environmentSchema = z
     OWNER_DIAGNOSTICS_TOKEN: z.string().trim().min(1).optional(),
     QUEUE_PREFIX: z.string().trim().min(1).max(64).default('pagepulse'),
     WORKER_ROLE: z.enum(workerRoles).default('scheduler'),
+    SCHEDULER_RECONCILIATION_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(3_600_000)
+      .default(300_000),
     HTTP_FETCH_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
     HTTP_FETCH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
     HTTP_FETCH_MAX_BYTES: z.coerce.number().int().min(1_024).max(100_000_000).default(5_242_880),

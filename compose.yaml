@@ -13,6 +13,7 @@ x-app-environment: &app-environment
   DATABASE_URL: ${DATABASE_URL:-mysql://pagepulse:local-pagepulse-only@mariadb:3306/pagepulse}
   REDIS_URL: ${REDIS_URL:-redis://:local-redis-only@redis:6379/0}
   QUEUE_PREFIX: ${QUEUE_PREFIX:-pagepulse}
+  SCHEDULER_RECONCILIATION_INTERVAL_MS: ${SCHEDULER_RECONCILIATION_INTERVAL_MS:-300000}
   SNAPSHOT_ROOT: /data/snapshots
 
 x-app-service: &app-service
