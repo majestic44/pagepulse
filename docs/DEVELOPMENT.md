@@ -56,6 +56,21 @@ The fake-target service must provide deterministic scenarios for unchanged conte
 
 Edit the Drizzle schema, generate SQL, review it manually, add migration tests and describe forward/rollback compatibility. Do not use automatic schema push in shared or production environments.
 
+## Owner bootstrap
+
+After migrations are applied, create the first owner from an interactive operator terminal:
+
+```bash
+pnpm owner:bootstrap -- --email owner@example.com
+```
+
+The command requires `APP_BASE_URL` and `DATABASE_URL`, creates one pending owner and prints a one-time
+`/setup/owner` URL. It stores only a token digest and expires the URL after 30 minutes by default. Before the
+owner completes setup, rerun it with the same email to revoke the prior unused URL and issue a replacement;
+it refuses after the owner becomes active. Treat the printed URL as a credential: do not run this command in
+CI or capture its output in logs. Configure `OWNER_SETUP_TOKEN_TTL_MINUTES` between 5 and 1,440 when a
+different lifetime is needed. Its redemption page and password setup arrive in Phase 2 item 12.
+
 ## Codex workflow
 
 Give Codex one implementation-plan issue at a time. Ask it to inspect this documentation and `AGENTS.md`, create a feature branch from `development`, implement tests and docs, validate locally, and open a PR. Do not combine authentication, browser isolation and notification delivery in one oversized change.

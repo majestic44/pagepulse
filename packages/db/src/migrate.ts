@@ -12,8 +12,8 @@ export const MIGRATION_LOCK_NAME = 'pagepulse_migrations';
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 60;
 
 export const currentSchemaCompatibility = Object.freeze({
-  schemaVersion: 2,
-  migrationId: 'outbox-and-schedule-registry',
+  schemaVersion: 3,
+  migrationId: 'owner-bootstrap-tokens',
   minimumAppVersion: '0.0.0',
 });
 

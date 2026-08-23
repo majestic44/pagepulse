@@ -15,6 +15,13 @@
       "when": 1787480611370,
       "tag": "0001_colorful_ulik",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787491255550,
+      "tag": "0002_long_sue_storm",
+      "breakpoints": true
     }
   ]
 }

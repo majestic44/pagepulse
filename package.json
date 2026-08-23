@@ -19,6 +19,7 @@
     "compose:config": "node scripts/validate-compose.mjs",
     "db:generate": "pnpm --filter @pagepulse/db generate",
     "db:migrate": "pnpm --filter @pagepulse/db migrate",
+    "owner:bootstrap": "pnpm --filter @pagepulse/db bootstrap-owner",
     "bootstrap:dev": "node scripts/bootstrap-dev.mjs"
   },
   "devDependencies": {

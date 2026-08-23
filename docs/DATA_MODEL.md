@@ -3,6 +3,7 @@
 ## Identity and authorization
 
 - `users`: email, password hash, verification state, timezone, theme, status, deletion deadline.
+- `owner_setup_tokens`: one SHA-256 token digest bound to the pending owner, with expiry, redemption and revocation timestamps. Plaintext setup tokens are never stored.
 - `roles`: fixed `owner` and `member` roles for v1.
 - `invitations`: hashed token, inviter, email, expiry and redemption state.
 - `sessions`: hashed token, device metadata, last used, expiry and revocation.

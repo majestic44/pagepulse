@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/migrate.ts",
+    "bootstrap-owner": "tsx src/bootstrap-owner.ts"
   },
   "dependencies": {
     "@pagepulse/config": "workspace:*",

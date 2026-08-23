@@ -11,6 +11,29 @@ export const users = mysqlTable('users', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const ownerSetupTokens = mysqlTable(
+  'owner_setup_tokens',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    ownerId: varchar('owner_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('owner_setup_tokens_owner_state_idx').on(
+      table.ownerId,
+      table.usedAt,
+      table.revokedAt,
+      table.expiresAt,
+    ),
+  ],
+);
+
 export const monitors = mysqlTable(
   'monitors',
   {

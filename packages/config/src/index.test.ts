@@ -30,7 +30,24 @@ describe('loadEnvironment', () => {
       HTTP_FETCH_CONCURRENCY: 3,
       REDIS_URL: 'redis://localhost:6379/0',
       SCHEDULER_RECONCILIATION_INTERVAL_MS: 300_000,
+      OWNER_SETUP_TOKEN_TTL_MINUTES: 30,
     });
+  });
+
+  it('rejects an unsafe owner setup token lifetime', () => {
+    let validationError: EnvironmentValidationError | undefined;
+    try {
+      loadEnvironment({ OWNER_SETUP_TOKEN_TTL_MINUTES: '4' });
+    } catch (error) {
+      if (error instanceof EnvironmentValidationError) {
+        validationError = error;
+      }
+    }
+
+    expect(validationError).toBeInstanceOf(EnvironmentValidationError);
+    expect(validationError?.issues).toContainEqual(
+      expect.objectContaining({ path: ['OWNER_SETUP_TOKEN_TTL_MINUTES'] }),
+    );
   });
 
   it('rejects an unsafe scheduler reconciliation interval', () => {
