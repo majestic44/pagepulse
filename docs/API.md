@@ -55,14 +55,27 @@ token.
   `202 { "status": "verification_required" }`.
 - `POST /api/v1/auth/invitations/redeem` accepts `{ token, password }` and returns the same `202` response.
 - `POST /api/v1/auth/email-verifications/confirm` accepts `{ token }` and returns `204` when it activates the account.
-- `POST /api/v1/auth/login` accepts `{ email, password }` and returns `204` only for an active, verified account. It
-  rotates the browser session and sets a host-only, HTTP-only, `SameSite=Strict` cookie (also `Secure` in production).
+- `POST /api/v1/auth/login` accepts `{ email, password }`. It returns `204` only when the account has no TOTP factor;
+  otherwise it returns `202 { "status": "totp_required" }` and sets a five-minute, host-only, HTTP-only,
+  `SameSite=Strict` challenge cookie (also `Secure` in production). Neither path exposes an opaque token.
+- `POST /api/v1/auth/totp/login` accepts exactly one of `{ code }` or `{ recoveryCode }`, consumes the challenge and
+  returns `204` only after the second factor succeeds. It then clears the challenge cookie and sets the normal session
+  cookie. TOTP proof attempts use their own Redis-backed, IP-hashed rate limit.
 - `POST /api/v1/auth/logout` clears the browser cookie and revokes its server-side session when present.
 - `GET /api/v1/account/sessions` returns only the active sessions belonging to the signed-in account, with derived
   device labels and timestamps but never a session token.
 - `DELETE /api/v1/account/sessions/{sessionId}` revokes one of the signed-in account's sessions. Revoking the current
   session also clears its cookie.
 - `POST /api/v1/account/sessions/revoke-others` revokes every active session except the current browser session.
+- `GET /api/v1/account/totp` returns only whether the signed-in account has an authenticator app enabled.
+- `POST /api/v1/account/totp/enrollments` creates a 10-minute, encrypted enrollment and returns a one-time
+  provisioning URI plus its manual entry key. The browser must not persist either value.
+- `POST /api/v1/account/totp/enrollments/confirm` accepts `{ code }`, verifies the pending enrollment, enables the
+  factor, revokes all other sessions, and returns a newly generated recovery-code set exactly once.
+- `POST /api/v1/account/totp/recovery-codes` accepts `{ code }` or `{ recoveryCode }`, replaces every recovery code,
+  revokes all other sessions, and returns the replacement set exactly once.
+- `DELETE /api/v1/account/totp` accepts `{ code }` or `{ recoveryCode }` and disables the factor after proof, revoking
+  all other sessions.
 - `POST /api/v1/auth/password-resets` accepts `{ email }` and always returns
   `202 { "status": "reset_requested" }`, preventing account enumeration.
 - `POST /api/v1/auth/password-resets/confirm` accepts `{ token, password }` and returns `204` on success.
@@ -73,6 +86,10 @@ when Redis cannot enforce that limit, it returns `503` rather than processing th
 
 Sessions are authoritative in MariaDB, expire after eight idle hours and always within 30 days by default, and are
 rotated on successful login. Completing a password reset revokes all active sessions for that account.
+
+TOTP uses RFC 6238 with six digits, SHA-1 and 30-second time steps. The validator accepts the current or immediately
+previous time step only and records successful time steps to prevent a code from being accepted twice. Enrollment and
+stored factors require `TOTP_ENCRYPTION_KEK`; absence of that secret fails TOTP operations closed with a generic 503.
 
 Outbound email delivery is deliberately deferred to Phase 5. This foundation creates only token hashes and does not
 return, log, queue, or persist a recoverable plaintext token. Consequently, a deployment cannot complete email

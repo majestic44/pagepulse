@@ -214,11 +214,68 @@ h3 {
   color: #fff;
   justify-self: start;
 }
+.text-button {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--accent) !important;
+  padding-left: 0 !important;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
 .form-message {
   min-height: 1.6em;
 }
 .session-actions {
   margin: 2rem 0 1rem;
+}
+.session-actions > button + button {
+  margin-left: 0.7rem;
+}
+.danger-button {
+  border-color: #a52a2a !important;
+  color: #a52a2a !important;
+}
+.totp-panel {
+  border-top: 1px solid var(--line);
+  margin-top: 3rem;
+  padding-top: 2.5rem;
+}
+.totp-panel h2 {
+  margin: 0.5rem 0 1rem;
+}
+.totp-panel h3 {
+  margin: 0 0 0.75rem;
+}
+.totp-enrollment,
+.recovery-code-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+}
+.totp-enrollment p,
+.recovery-code-panel p,
+.manual-key {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.manual-key code {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.inline-link {
+  display: inline-block;
+  margin: 0.5rem 0;
+}
+.recovery-code-list {
+  display: grid;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  gap: 0.4rem 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 1rem 0 1.5rem;
+  padding: 0;
 }
 .session-list {
   display: grid;
@@ -291,5 +348,12 @@ h3 {
   }
   .session-list button {
     align-self: start;
+  }
+  .session-actions > button + button {
+    margin-left: 0;
+    margin-top: 0.7rem;
+  }
+  .recovery-code-list {
+    grid-template-columns: 1fr;
   }
 }

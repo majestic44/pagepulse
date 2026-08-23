@@ -39,6 +39,13 @@ const environmentSchema = z
       .min(1_000)
       .max(86_400_000)
       .default(900_000),
+    AUTH_TOTP_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(5),
+    AUTH_TOTP_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(900_000),
     AUTH_RESET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(3),
     AUTH_RESET_RATE_LIMIT_WINDOW_MS: z.coerce
       .number()

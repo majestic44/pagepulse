@@ -33,6 +33,7 @@ describe('loadEnvironment', () => {
       OWNER_SETUP_TOKEN_TTL_MINUTES: 30,
       AUTH_ARGON2_MEMORY_KIB: 65_536,
       AUTH_LOGIN_RATE_LIMIT_MAX: 5,
+      AUTH_TOTP_RATE_LIMIT_MAX: 5,
     });
   });
 

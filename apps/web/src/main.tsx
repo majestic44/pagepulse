@@ -21,7 +21,7 @@ const milestones = [
   },
   {
     detail:
-      'Owner bootstrap, secure credentials and active-session controls are in place; access policies follow.',
+      'Owner bootstrap, password sign-in, authenticator-app MFA and active-session controls are in place; access policies follow.',
     label: 'Phase 2',
     status: 'In progress',
     title: 'Identity and administration',
@@ -41,7 +41,18 @@ type SessionSummary = Readonly<{
 type SessionState =
   | Readonly<{ kind: 'loading' }>
   | Readonly<{ kind: 'signed-out' }>
-  | Readonly<{ kind: 'ready'; sessions: ReadonlyArray<SessionSummary> }>;
+  | Readonly<{
+      kind: 'ready';
+      sessions: ReadonlyArray<SessionSummary>;
+      totpEnabled: boolean;
+    }>;
+
+type TotpEnrollment = Readonly<{
+  manualEntryKey: string;
+  otpauthUri: string;
+}>;
+
+type FactorAction = 'disable' | 'replace-recovery-codes' | undefined;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -56,20 +67,42 @@ function AccountSessions() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
+  const [totpLoginRequired, setTotpLoginRequired] = useState(false);
+  const [useRecoveryLogin, setUseRecoveryLogin] = useState(false);
+  const [loginProof, setLoginProof] = useState('');
+  const [enrollment, setEnrollment] = useState<TotpEnrollment>();
+  const [enrollmentCode, setEnrollmentCode] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<ReadonlyArray<string>>();
+  const [factorAction, setFactorAction] = useState<FactorAction>();
+  const [useRecoveryProof, setUseRecoveryProof] = useState(false);
+  const [factorProof, setFactorProof] = useState('');
 
   const loadSessions = useCallback(async () => {
     setMessage(undefined);
     try {
-      const response = await fetch('/api/v1/account/sessions', { credentials: 'same-origin' });
-      if (response.status === 401) {
+      const sessionResponse = await fetch('/api/v1/account/sessions', {
+        credentials: 'same-origin',
+      });
+      if (sessionResponse.status === 401) {
         setState({ kind: 'signed-out' });
         return;
       }
-      if (!response.ok) {
+      if (!sessionResponse.ok) {
         throw new Error('Unable to load active sessions');
       }
-      const payload = (await response.json()) as { sessions: ReadonlyArray<SessionSummary> };
-      setState({ kind: 'ready', sessions: payload.sessions });
+      const [sessionPayload, totpResponse] = await Promise.all([
+        sessionResponse.json() as Promise<{ sessions: ReadonlyArray<SessionSummary> }>,
+        fetch('/api/v1/account/totp', { credentials: 'same-origin' }),
+      ]);
+      if (!totpResponse.ok) {
+        throw new Error('Unable to load account factor status');
+      }
+      const totpPayload = (await totpResponse.json()) as { enabled: boolean };
+      setState({
+        kind: 'ready',
+        sessions: sessionPayload.sessions,
+        totpEnabled: totpPayload.enabled,
+      });
     } catch {
       setState({ kind: 'signed-out' });
       setMessage('Account security is temporarily unavailable. Please try again.');
@@ -91,11 +124,43 @@ function AccountSessions() {
         headers: { 'Content-Type': 'application/json' },
         method: 'POST',
       });
+      if (response.status === 202) {
+        setPassword('');
+        setTotpLoginRequired(true);
+        return;
+      }
       if (response.status !== 204) {
         setMessage('Sign-in failed. Check your email and password, then try again.');
         return;
       }
       setPassword('');
+      await loadSessions();
+    } catch {
+      setMessage('Account security is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function completeTotpLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/auth/totp/login', {
+        body: JSON.stringify(
+          useRecoveryLogin ? { recoveryCode: loginProof } : { code: loginProof },
+        ),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status !== 204) {
+        setMessage('The authenticator code or recovery code was not accepted.');
+        return;
+      }
+      setLoginProof('');
+      setTotpLoginRequired(false);
       await loadSessions();
     } catch {
       setMessage('Account security is temporarily unavailable. Please try again.');
@@ -143,6 +208,91 @@ function AccountSessions() {
     }
   }
 
+  async function startTotpEnrollment() {
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/account/totp/enrollments', {
+        credentials: 'same-origin',
+        method: 'POST',
+      });
+      if (!response.ok) {
+        throw new Error('Unable to start authenticator enrollment');
+      }
+      setEnrollment((await response.json()) as TotpEnrollment);
+      setEnrollmentCode('');
+    } catch {
+      setMessage('Authenticator enrollment is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function confirmTotpEnrollment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/account/totp/enrollments/confirm', {
+        body: JSON.stringify({ code: enrollmentCode }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (!response.ok) {
+        setMessage('The authenticator code was not accepted.');
+        return;
+      }
+      const payload = (await response.json()) as { recoveryCodes: ReadonlyArray<string> };
+      setRecoveryCodes(payload.recoveryCodes);
+      setEnrollment(undefined);
+      setEnrollmentCode('');
+      await loadSessions();
+    } catch {
+      setMessage('Authenticator enrollment is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitFactorAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!factorAction) {
+      return;
+    }
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const endpoint =
+        factorAction === 'disable' ? '/api/v1/account/totp' : '/api/v1/account/totp/recovery-codes';
+      const response = await fetch(endpoint, {
+        body: JSON.stringify(
+          useRecoveryProof ? { recoveryCode: factorProof } : { code: factorProof },
+        ),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: factorAction === 'disable' ? 'DELETE' : 'POST',
+      });
+      if (!response.ok) {
+        setMessage('The authenticator proof was not accepted.');
+        return;
+      }
+      if (factorAction === 'replace-recovery-codes') {
+        const payload = (await response.json()) as { recoveryCodes: ReadonlyArray<string> };
+        setRecoveryCodes(payload.recoveryCodes);
+      } else {
+        setMessage('Authenticator app sign-in has been disabled.');
+      }
+      setFactorAction(undefined);
+      setFactorProof('');
+      await loadSessions();
+    } catch {
+      setMessage('Authenticator settings are temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (state.kind === 'loading') {
     return (
       <main className="shell account-shell" aria-live="polite">
@@ -159,39 +309,83 @@ function AccountSessions() {
           ← Project status
         </a>
         <p className="eyebrow">ACCOUNT SECURITY</p>
-        <h1>Sign in to manage your active sessions.</h1>
+        <h1>
+          {totpLoginRequired
+            ? 'Enter your authenticator code.'
+            : 'Sign in to manage your active sessions.'}
+        </h1>
         <p className="account-intro">
-          This page lists active browser sessions for your account. Signing in creates a new secure
-          session and replaces the session in this browser.
+          {totpLoginRequired
+            ? 'Your password was accepted. Complete the second factor to create a secure browser session.'
+            : 'This page lists active browser sessions for your account. Signing in creates a new secure session and replaces the session in this browser.'}
         </p>
-        <form className="sign-in-form" onSubmit={(event) => void signIn(event)}>
-          <label>
-            Email
-            <input
-              autoComplete="email"
+        {totpLoginRequired ? (
+          <form className="sign-in-form" onSubmit={(event) => void completeTotpLogin(event)}>
+            <label>
+              {useRecoveryLogin ? 'Recovery code' : 'Authenticator code'}
+              <input
+                autoComplete="one-time-code"
+                disabled={submitting}
+                inputMode={useRecoveryLogin ? 'text' : 'numeric'}
+                onChange={(event) => setLoginProof(event.target.value)}
+                pattern={useRecoveryLogin ? '[A-Za-z0-9 -]+' : '\\d{6}'}
+                required
+                value={loginProof}
+              />
+            </label>
+            <button disabled={submitting} type="submit">
+              {submitting ? 'Verifying…' : 'Verify and sign in'}
+            </button>
+            <button
+              className="text-button"
               disabled={submitting}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete="current-password"
+              onClick={() => {
+                setLoginProof('');
+                setUseRecoveryLogin((value) => !value);
+              }}
+              type="button"
+            >
+              {useRecoveryLogin ? 'Use authenticator code instead' : 'Use a recovery code instead'}
+            </button>
+            <button
+              className="text-button"
               disabled={submitting}
-              minLength={12}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-          </label>
-          <button disabled={submitting} type="submit">
-            {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
+              onClick={() => setTotpLoginRequired(false)}
+              type="button"
+            >
+              Use a different account
+            </button>
+          </form>
+        ) : (
+          <form className="sign-in-form" onSubmit={(event) => void signIn(event)}>
+            <label>
+              Email
+              <input
+                autoComplete="email"
+                disabled={submitting}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                type="email"
+                value={email}
+              />
+            </label>
+            <label>
+              Password
+              <input
+                autoComplete="current-password"
+                disabled={submitting}
+                minLength={12}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+            </label>
+            <button disabled={submitting} type="submit">
+              {submitting ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+        )}
         <p aria-live="polite" className="form-message" role="status">
           {message}
         </p>
@@ -240,6 +434,137 @@ function AccountSessions() {
           </li>
         ))}
       </ol>
+      <section className="totp-panel" aria-labelledby="totp-title">
+        <p className="eyebrow">AUTHENTICATOR APP</p>
+        <h2 id="totp-title">
+          {state.totpEnabled ? 'Two-step sign-in is enabled' : 'Add an authenticator app'}
+        </h2>
+        {recoveryCodes ? (
+          <div className="recovery-code-panel">
+            <h3>Save these recovery codes now</h3>
+            <p>Each code works once. They will not be shown again after you leave this panel.</p>
+            <ul className="recovery-code-list">
+              {recoveryCodes.map((code) => (
+                <li key={code}>{code}</li>
+              ))}
+            </ul>
+            <button disabled={submitting} onClick={() => setRecoveryCodes(undefined)} type="button">
+              I have saved my recovery codes
+            </button>
+          </div>
+        ) : null}
+        {enrollment ? (
+          <div className="totp-enrollment">
+            <p>
+              Add this account to an RFC 6238-compatible authenticator, then enter its six-digit
+              code.
+            </p>
+            <p className="manual-key">
+              Manual key: <code>{enrollment.manualEntryKey}</code>
+            </p>
+            <a className="account-link inline-link" href={enrollment.otpauthUri}>
+              Open authenticator app
+            </a>
+            <form className="sign-in-form" onSubmit={(event) => void confirmTotpEnrollment(event)}>
+              <label>
+                Authenticator code
+                <input
+                  autoComplete="one-time-code"
+                  disabled={submitting}
+                  inputMode="numeric"
+                  onChange={(event) => setEnrollmentCode(event.target.value)}
+                  pattern="\\d{6}"
+                  required
+                  value={enrollmentCode}
+                />
+              </label>
+              <button disabled={submitting} type="submit">
+                {submitting ? 'Verifying…' : 'Enable authenticator app'}
+              </button>
+              <button
+                className="text-button"
+                disabled={submitting}
+                onClick={() => setEnrollment(undefined)}
+                type="button"
+              >
+                Cancel enrollment
+              </button>
+            </form>
+          </div>
+        ) : factorAction ? (
+          <form className="sign-in-form" onSubmit={(event) => void submitFactorAction(event)}>
+            <p>
+              {factorAction === 'disable'
+                ? 'Confirm with your authenticator or a recovery code before disabling it.'
+                : 'Confirm with your authenticator or a recovery code to replace every existing recovery code.'}
+            </p>
+            <label>
+              {useRecoveryProof ? 'Recovery code' : 'Authenticator code'}
+              <input
+                autoComplete="one-time-code"
+                disabled={submitting}
+                inputMode={useRecoveryProof ? 'text' : 'numeric'}
+                onChange={(event) => setFactorProof(event.target.value)}
+                pattern={useRecoveryProof ? '[A-Za-z0-9 -]+' : '\\d{6}'}
+                required
+                value={factorProof}
+              />
+            </label>
+            <button disabled={submitting} type="submit">
+              {factorAction === 'disable' ? 'Disable authenticator app' : 'Replace recovery codes'}
+            </button>
+            <button
+              className="text-button"
+              disabled={submitting}
+              onClick={() => {
+                setFactorProof('');
+                setUseRecoveryProof((value) => !value);
+              }}
+              type="button"
+            >
+              {useRecoveryProof ? 'Use authenticator code instead' : 'Use a recovery code instead'}
+            </button>
+            <button
+              className="text-button"
+              disabled={submitting}
+              onClick={() => setFactorAction(undefined)}
+              type="button"
+            >
+              Cancel
+            </button>
+          </form>
+        ) : state.totpEnabled ? (
+          <div className="session-actions">
+            <p className="account-intro">
+              A verified code is required whenever a new browser session is created.
+            </p>
+            <button
+              disabled={submitting}
+              onClick={() => setFactorAction('replace-recovery-codes')}
+              type="button"
+            >
+              Generate new recovery codes
+            </button>
+            <button
+              className="danger-button"
+              disabled={submitting}
+              onClick={() => setFactorAction('disable')}
+              type="button"
+            >
+              Disable authenticator app
+            </button>
+          </div>
+        ) : (
+          <div className="session-actions">
+            <p className="account-intro">
+              Use a separate authenticator app for a six-digit sign-in code.
+            </p>
+            <button disabled={submitting} onClick={() => void startTotpEnrollment()} type="button">
+              Set up authenticator app
+            </button>
+          </div>
+        )}
+      </section>
       <p aria-live="polite" className="form-message" role="status">
         {message}
       </p>
@@ -278,7 +603,8 @@ function App() {
         </p>
         <p className="status-note">
           Verification and password-reset delivery are deliberately deferred until the notification
-          platform is ready. Active-session controls are now available; monitoring screens follow.
+          platform is ready. Authenticator-app MFA and active-session controls are now available;
+          monitoring screens follow.
         </p>
       </section>
 

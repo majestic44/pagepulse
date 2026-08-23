@@ -151,6 +151,18 @@ export const LoginRequest = Type.Object(
   queuePayloadOptions,
 );
 
+export const TotpCodeRequest = Type.Object(
+  { code: Type.String({ minLength: 6, maxLength: 6, pattern: '^\\d{6}$' }) },
+  queuePayloadOptions,
+);
+
+export const TotpRecoveryCodeRequest = Type.Object(
+  { recoveryCode: Type.String({ minLength: 12, maxLength: 32 }) },
+  queuePayloadOptions,
+);
+
+export const TotpProofRequest = Type.Union([TotpCodeRequest, TotpRecoveryCodeRequest]);
+
 export const TokenRequest = Type.Object(
   { token: Type.String({ minLength: 1, maxLength: 256 }) },
   queuePayloadOptions,
@@ -162,7 +174,11 @@ export const PasswordResetRequest = Type.Object(
 );
 
 export const AuthenticationAcceptedResponse = Type.Object({
-  status: Type.Union([Type.Literal('reset_requested'), Type.Literal('verification_required')]),
+  status: Type.Union([
+    Type.Literal('reset_requested'),
+    Type.Literal('totp_required'),
+    Type.Literal('verification_required'),
+  ]),
 });
 
 export const InvalidAuthenticationRequestResponse = Type.Object({
@@ -193,4 +209,20 @@ export const ActiveSessionsResponse = Type.Object({
 
 export const SessionIdParameters = Type.Object({
   sessionId: Type.String({ minLength: 1, maxLength: 36 }),
+});
+
+export const TotpStatusResponse = Type.Object({
+  enabled: Type.Boolean(),
+});
+
+export const TotpEnrollmentResponse = Type.Object({
+  manualEntryKey: Type.String({ minLength: 16, maxLength: 128 }),
+  otpauthUri: Type.String({ minLength: 1, maxLength: 2_048 }),
+});
+
+export const RecoveryCodesResponse = Type.Object({
+  recoveryCodes: Type.Array(Type.String({ minLength: 14, maxLength: 14 }), {
+    minItems: 1,
+    maxItems: 20,
+  }),
 });

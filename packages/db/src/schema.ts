@@ -1,4 +1,12 @@
-import { index, int, mysqlEnum, mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core';
+import {
+  bigint,
+  index,
+  int,
+  mysqlEnum,
+  mysqlTable,
+  timestamp,
+  varchar,
+} from 'drizzle-orm/mysql-core';
 
 export const users = mysqlTable('users', {
   id: varchar('id', { length: 36 }).primaryKey(),
@@ -103,6 +111,65 @@ export const sessions = mysqlTable(
       table.idleExpiresAt,
       table.absoluteExpiresAt,
       table.lastUsedAt,
+    ),
+  ],
+);
+
+export const totpMethods = mysqlTable('totp_methods', {
+  userId: varchar('user_id', { length: 36 })
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  secretCiphertext: varchar('secret_ciphertext', { length: 512 }).notNull(),
+  lastVerifiedTimeStep: bigint('last_verified_time_step', { mode: 'number' }),
+  enabledAt: timestamp('enabled_at').notNull(),
+  updatedAt: timestamp('updated_at').notNull(),
+});
+
+export const totpEnrollments = mysqlTable('totp_enrollments', {
+  userId: varchar('user_id', { length: 36 })
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  secretCiphertext: varchar('secret_ciphertext', { length: 512 }).notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export const totpRecoveryCodes = mysqlTable(
+  'totp_recovery_codes',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    userId: varchar('user_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: varchar('code_hash', { length: 64 }).notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('totp_recovery_codes_user_state_idx').on(table.userId, table.usedAt),
+    index('totp_recovery_codes_user_hash_idx').on(table.userId, table.codeHash),
+  ],
+);
+
+export const totpLoginChallenges = mysqlTable(
+  'totp_login_challenges',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    userId: varchar('user_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('totp_login_challenges_user_state_idx').on(
+      table.userId,
+      table.usedAt,
+      table.revokedAt,
+      table.expiresAt,
     ),
   ],
 );

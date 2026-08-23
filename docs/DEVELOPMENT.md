@@ -87,6 +87,15 @@ Session cookies are host-only, HTTP-only and `SameSite=Strict`; production deplo
 Email delivery is not part of this identity foundation. It is deferred to the Phase 5 provider work, so the current
 development stack cannot send verification or password-reset messages and never prints those token values to logs.
 
+## TOTP configuration
+
+Set `TOTP_ENCRYPTION_KEK` through Infisical (or `TOTP_ENCRYPTION_KEK_FILE`) before enabling an authenticator app.
+It is used only in API memory to encrypt/decrypt the short RFC 6238 secret and HMAC recovery-code digests; never copy
+the development placeholder to production. Authenticator enrollment lasts 10 minutes and emits a provisioning URI and
+manual key only to the active browser response. Recovery codes are displayed once, never logged, and should be saved
+outside PagePulse. TOTP proof, enrollment confirmation, recovery-code replacement, and factor disablement share the
+bounded `AUTH_TOTP_RATE_LIMIT_MAX` / `AUTH_TOTP_RATE_LIMIT_WINDOW_MS` policy.
+
 ## Codex workflow
 
 Give Codex one implementation-plan issue at a time. Ask it to inspect this documentation and `AGENTS.md`, create a feature branch from `development`, implement tests and docs, validate locally, and open a PR. Do not combine authentication, browser isolation and notification delivery in one oversized change.
