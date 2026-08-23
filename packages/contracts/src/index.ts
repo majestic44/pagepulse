@@ -176,3 +176,21 @@ export const TooManyRequestsResponse = Type.Object({
 export const AuthenticationUnavailableResponse = Type.Object({
   error: Type.Literal('Authentication temporarily unavailable'),
 });
+
+export const SessionSummary = Type.Object({
+  absoluteExpiresAt: Type.String({ format: 'date-time' }),
+  createdAt: Type.String({ format: 'date-time' }),
+  current: Type.Boolean(),
+  deviceLabel: Type.String({ minLength: 1, maxLength: 160 }),
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  idleExpiresAt: Type.String({ format: 'date-time' }),
+  lastUsedAt: Type.String({ format: 'date-time' }),
+});
+
+export const ActiveSessionsResponse = Type.Object({
+  sessions: Type.Array(SessionSummary),
+});
+
+export const SessionIdParameters = Type.Object({
+  sessionId: Type.String({ minLength: 1, maxLength: 36 }),
+});

@@ -12,8 +12,8 @@ export const MIGRATION_LOCK_NAME = 'pagepulse_migrations';
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 60;
 
 export const currentSchemaCompatibility = Object.freeze({
-  schemaVersion: 4,
-  migrationId: 'identity-auth-foundation',
+  schemaVersion: 5,
+  migrationId: 'session-management',
   minimumAppVersion: '0.0.0',
 });
 

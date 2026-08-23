@@ -79,6 +79,11 @@ The API uses Node's native Argon2id implementation. Keep `AUTH_ARGON2_MEMORY_KIB
 change. Configure the verification/reset token lifetimes and bounded login, reset and redemption rate limits through
 the matching `AUTH_*` and `*_TOKEN_TTL_MINUTES` variables in `.env.example`.
 
+Session cookies are host-only, HTTP-only and `SameSite=Strict`; production deployments add the `Secure` attribute.
+`SESSION_IDLE_TTL_MINUTES` defaults to 480 (eight hours) and `SESSION_ABSOLUTE_TTL_MINUTES` defaults to 43,200
+(30 days). The idle lifetime must not exceed the absolute lifetime. Local HTTP development intentionally omits the
+`Secure` attribute so browser session testing works on loopback; production requires HTTPS for `APP_BASE_URL`.
+
 Email delivery is not part of this identity foundation. It is deferred to the Phase 5 provider work, so the current
 development stack cannot send verification or password-reset messages and never prints those token values to logs.
 

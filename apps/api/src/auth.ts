@@ -19,6 +19,8 @@ import {
   withAuthenticationTransaction,
 } from '@pagepulse/db';
 
+import type { SessionService } from './session.js';
+
 export type AuthenticationTokenIssue = Readonly<{
   expiresAt: Date;
   token: string;
@@ -27,7 +29,7 @@ export type AuthenticationTokenIssue = Readonly<{
 export type AuthenticationService = Readonly<{
   completePasswordReset: (token: string, password: string) => Promise<void>;
   confirmEmailVerification: (token: string) => Promise<void>;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<AuthenticationUser | undefined>;
   redeemInvitation: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   redeemOwnerSetup: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   requestPasswordReset: (email: string) => Promise<AuthenticationTokenIssue | undefined>;
@@ -100,7 +102,7 @@ export async function createAuthenticationService({
         password,
         user?.passwordHash ?? dummyPasswordHash,
       );
-      return passwordMatches && hasActiveVerifiedPassword(user);
+      return passwordMatches && hasActiveVerifiedPassword(user) ? user : undefined;
     },
 
     async redeemInvitation(token, password) {
@@ -149,4 +151,5 @@ export type AuthenticationDependencies = Readonly<{
   rateLimitPolicies: AuthenticationRateLimitPolicies;
   rateLimitStore: RateLimitStore;
   service: AuthenticationService;
+  sessions: SessionService;
 }>;

@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { normalizeEmail } from '@pagepulse/auth';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 
+import { revokeSessionsForUser } from './sessions.js';
+
 export const AccountTokenTypes = Object.freeze({
   emailVerification: 'email_verification',
   passwordReset: 'password_reset',
@@ -352,4 +354,5 @@ export async function resetPassword(
     'UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?',
     [input.passwordHash, now, readString(record, 'userId')],
   );
+  await revokeSessionsForUser(connection, readString(record, 'userId'), now);
 }
