@@ -28,8 +28,13 @@ import {
   InvalidAuthenticationRequestResponse,
   LoginRequest,
   PasswordResetRequest,
+  RecoveryCodesResponse,
   SessionIdParameters,
   TokenRequest,
+  TotpCodeRequest,
+  TotpEnrollmentResponse,
+  TotpProofRequest,
+  TotpStatusResponse,
   TooManyRequestsResponse,
   UnauthorizedResponse,
   VersionResponse,
@@ -48,6 +53,12 @@ import {
   readSessionCookie,
   serializeSessionCookie,
 } from './session.js';
+import {
+  clearTotpLoginChallengeCookie,
+  createTotpService,
+  readTotpLoginChallengeCookie,
+  serializeTotpLoginChallengeCookie,
+} from './totp.js';
 
 export type BuildAppOptions = Readonly<{
   authentication?: AuthenticationDependencies;
@@ -76,6 +87,10 @@ function authenticationRateLimitPolicies(
     login: {
       limit: environment.AUTH_LOGIN_RATE_LIMIT_MAX,
       windowMs: environment.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+    },
+    totp: {
+      limit: environment.AUTH_TOTP_RATE_LIMIT_MAX,
+      windowMs: environment.AUTH_TOTP_RATE_LIMIT_WINDOW_MS,
     },
     redemption: {
       limit: environment.AUTH_REDEMPTION_RATE_LIMIT_MAX,
@@ -118,6 +133,10 @@ async function createDefaultAuthenticationDependencies(
           idleTtlMinutes: environment.SESSION_IDLE_TTL_MINUTES,
         },
       }),
+      totp: createTotpService({
+        encryptionKey: environment.TOTP_ENCRYPTION_KEK,
+        pool,
+      }),
     };
   } catch (error) {
     await Promise.allSettled([pool.end(), redis.quit()]);
@@ -153,10 +172,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await defaultAuthentication?.close();
   });
   app.addHook('onRequest', async (request, reply) => {
-    if (
-      request.url.startsWith('/api/v1/auth/') ||
-      request.url.startsWith('/api/v1/account/sessions')
-    ) {
+    if (request.url.startsWith('/api/v1/auth/') || request.url.startsWith('/api/v1/account/')) {
       reply.header('Cache-Control', 'no-store');
     }
   });
@@ -386,15 +402,32 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        const user = await authentication.service.login(request.body.email, request.body.password);
-        if (!user) {
+        const login = await authentication.service.login(request.body.email, request.body.password);
+        if (!login) {
           return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        if (login.totpEnabled) {
+          try {
+            const challenge = await authentication.totp.createLoginChallenge(login.user.id);
+            reply.header(
+              'Set-Cookie',
+              serializeTotpLoginChallengeCookie(
+                challenge.token,
+                challenge.expiresAt,
+                new Date(now()),
+                sessionCookieIsSecure,
+              ),
+            );
+            return reply.code(202).send({ status: 'totp_required' });
+          } catch {
+            return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+          }
         }
         try {
           const issued = await authentication.sessions.issue(
             {
               deviceLabel: deviceLabel(request.headers['user-agent']),
-              userId: user.id,
+              userId: login.user.id,
             },
             readSessionCookie(request.headers.cookie),
           );
@@ -413,6 +446,59 @@ export async function buildApp(options: BuildAppOptions = {}) {
         }
       } catch {
         return reply.code(401).send({ error: 'Unauthorized' });
+      }
+    },
+  );
+
+  app.post<{ Body: { code?: string; recoveryCode?: string } }>(
+    '/api/v1/auth/totp/login',
+    {
+      schema: {
+        body: TotpProofRequest,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('totp', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      const challengeToken = readTotpLoginChallengeCookie(request.headers.cookie);
+      if (!challengeToken) {
+        return reply.code(401).send({ error: 'Unauthorized' });
+      }
+      try {
+        const user = await authentication.totp.completeLogin(challengeToken, request.body);
+        const issued = await authentication.sessions.issue(
+          {
+            deviceLabel: deviceLabel(request.headers['user-agent']),
+            userId: user.userId,
+          },
+          readSessionCookie(request.headers.cookie),
+        );
+        reply.header('Set-Cookie', [
+          clearTotpLoginChallengeCookie(sessionCookieIsSecure),
+          serializeSessionCookie(
+            issued.token,
+            issued.expiresAt,
+            new Date(now()),
+            sessionCookieIsSecure,
+          ),
+        ]);
+        return reply.code(204).send();
+      } catch (error) {
+        if (
+          error instanceof AuthenticationTokenError ||
+          error instanceof AuthenticationStateError
+        ) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
       }
     },
   );
@@ -498,6 +584,187 @@ export async function buildApp(options: BuildAppOptions = {}) {
       }
       reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
       return reply.code(204).send();
+    },
+  );
+
+  app.get(
+    '/api/v1/account/totp',
+    {
+      schema: {
+        response: {
+          200: TotpStatusResponse,
+          401: UnauthorizedResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        return { enabled: await current.authentication.totp.isEnabled(current.session.userId) };
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post(
+    '/api/v1/account/totp/enrollments',
+    {
+      schema: {
+        response: {
+          200: TotpEnrollmentResponse,
+          400: InvalidAuthenticationRequestResponse,
+          401: UnauthorizedResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        return await current.authentication.totp.beginEnrollment({
+          email: current.session.email,
+          userId: current.session.userId,
+        });
+      } catch (error) {
+        if (error instanceof AuthenticationStateError) {
+          return reply.code(400).send(invalidAuthenticationResponse);
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Body: { code: string } }>(
+    '/api/v1/account/totp/enrollments/confirm',
+    {
+      schema: {
+        body: TotpCodeRequest,
+        response: {
+          200: RecoveryCodesResponse,
+          400: InvalidAuthenticationRequestResponse,
+          401: UnauthorizedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('totp', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        return {
+          recoveryCodes: await current.authentication.totp.confirmEnrollment(
+            current.session.userId,
+            current.session.id,
+            request.body.code,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof AuthenticationTokenError) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        if (error instanceof AuthenticationStateError) {
+          return reply.code(400).send(invalidAuthenticationResponse);
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Body: { code?: string; recoveryCode?: string } }>(
+    '/api/v1/account/totp/recovery-codes',
+    {
+      schema: {
+        body: TotpProofRequest,
+        response: {
+          200: RecoveryCodesResponse,
+          401: UnauthorizedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('totp', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        return {
+          recoveryCodes: await current.authentication.totp.replaceRecoveryCodes(
+            current.session.userId,
+            current.session.id,
+            request.body,
+          ),
+        };
+      } catch (error) {
+        if (
+          error instanceof AuthenticationTokenError ||
+          error instanceof AuthenticationStateError
+        ) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.delete<{ Body: { code?: string; recoveryCode?: string } }>(
+    '/api/v1/account/totp',
+    {
+      schema: {
+        body: TotpProofRequest,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('totp', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        await current.authentication.totp.disable(
+          current.session.userId,
+          current.session.id,
+          request.body,
+        );
+        return reply.code(204).send();
+      } catch (error) {
+        if (
+          error instanceof AuthenticationTokenError ||
+          error instanceof AuthenticationStateError
+        ) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
     },
   );
 

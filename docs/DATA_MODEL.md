@@ -10,7 +10,10 @@
   expiry, use and revocation timestamps. Issuing a token of either type revokes the prior unused token for that user.
 - `sessions`: SHA-256 token digest, derived browser/operating-system label, last-used time, idle and absolute
   expiry, plus revocation. Plaintext session tokens exist only in the HTTP-only browser cookie.
-- `totp_methods`: encrypted secret, recovery-code hashes and timestamps.
+- `totp_methods`: one encrypted RFC 6238 secret per user, last accepted time step, enable/update timestamps.
+- `totp_enrollments`: encrypted 10-minute pending secret per user; it becomes a method only after the first valid code.
+- `totp_login_challenges`: SHA-256 digest of the five-minute password-to-factor challenge, plus use/revocation state.
+- `totp_recovery_codes`: one-way user-bound recovery-code digest and single-use timestamp; raw codes are never stored.
 - `personal_access_tokens`: prefix, token hash, scopes, expiry, rate tier, last-used IP/time and revocation.
 
 ## Monitoring
@@ -59,3 +62,6 @@
 - Migration `0004_vengeful_ego` is additive: it adds the server-side `sessions` table. Rollback is a reviewed restore
   from a verified pre-migration backup after session endpoints are disabled; it must not be dropped in place on a live
   deployment.
+- Migration `0005_brown_microbe` is additive: it adds encrypted TOTP factor, pending enrollment, opaque login
+  challenge, and one-way recovery-code records. Rollback is a reviewed restore from a verified pre-migration backup
+  after TOTP routes are disabled; it must not be dropped in place on a live deployment.

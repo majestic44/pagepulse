@@ -6,6 +6,7 @@ import type { AuthenticationDependencies, AuthenticationService } from './auth.j
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
 import type { SessionService } from './session.js';
+import type { TotpService } from './totp.js';
 
 let app: Awaited<ReturnType<typeof buildApp>> | undefined;
 afterEach(async () => app?.close());
@@ -16,12 +17,14 @@ function createAuthenticationDependencies(
     increment: vi.fn().mockResolvedValue({ count: 1, ttlMs: 60_000 }),
   },
   sessions: Partial<SessionService> = {},
+  totp: Partial<TotpService> = {},
 ): AuthenticationDependencies {
   return {
     rateLimitPolicies: {
       login: { limit: 5, windowMs: 60_000 },
       redemption: { limit: 5, windowMs: 60_000 },
       reset: { limit: 3, windowMs: 60_000 },
+      totp: { limit: 5, windowMs: 60_000 },
     },
     rateLimitStore,
     service: {
@@ -50,6 +53,27 @@ function createAuthenticationDependencies(
       revokeByToken: vi.fn().mockResolvedValue(undefined),
       revokeOthers: vi.fn().mockResolvedValue(undefined),
       ...sessions,
+    },
+    totp: {
+      beginEnrollment: vi.fn().mockResolvedValue({
+        manualEntryKey: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+        otpauthUri:
+          'otpauth://totp/PagePulse%3Aowner%40example.test?secret=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+      }),
+      completeLogin: vi.fn().mockResolvedValue({
+        email: authenticatedUser.email,
+        role: authenticatedUser.role,
+        userId: authenticatedUser.id,
+      }),
+      confirmEnrollment: vi.fn().mockResolvedValue(['ABCD-EFGH-JKLM']),
+      createLoginChallenge: vi.fn().mockResolvedValue({
+        expiresAt: new Date('2026-08-23T00:05:00.000Z'),
+        token: 'B'.repeat(43),
+      }),
+      disable: vi.fn().mockResolvedValue(undefined),
+      isEnabled: vi.fn().mockResolvedValue(false),
+      replaceRecoveryCodes: vi.fn().mockResolvedValue(['ABCD-EFGH-JKLM']),
+      ...totp,
     },
   };
 }
@@ -283,7 +307,7 @@ describe('authentication contract', () => {
 
   it('issues an HTTP-only strict session cookie after login', async () => {
     const authentication = createAuthenticationDependencies({
-      login: vi.fn().mockResolvedValue(authenticatedUser),
+      login: vi.fn().mockResolvedValue({ totpEnabled: false, user: authenticatedUser }),
     });
     const testApp = await buildApp({ authentication });
     app = testApp;
@@ -302,6 +326,123 @@ describe('authentication contract', () => {
       { deviceLabel: 'Unknown browser on unknown device', userId: authenticatedUser.id },
       undefined,
     );
+  });
+
+  it('requires a short-lived HTTP-only challenge before creating a session for a TOTP account', async () => {
+    const authentication = createAuthenticationDependencies({
+      login: vi.fn().mockResolvedValue({ totpEnabled: true, user: authenticatedUser }),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'owner@example.test', password: 'a secure password' },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ status: 'totp_required' });
+    expect(response.headers['set-cookie']).toContain('pagepulse_totp_challenge=');
+    expect(response.headers['set-cookie']).toContain('HttpOnly');
+    expect(response.headers['set-cookie']).toContain('SameSite=Strict');
+    expect(authentication.sessions.issue).not.toHaveBeenCalled();
+  });
+
+  it('exchanges a valid TOTP challenge for a session without returning either opaque token', async () => {
+    const authentication = createAuthenticationDependencies();
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const challengeToken = 'B'.repeat(43);
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/totp/login',
+      headers: { cookie: `pagepulse_totp_challenge=${challengeToken}` },
+      payload: { code: '123456' },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['set-cookie']).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('pagepulse_totp_challenge=; Max-Age=0'),
+        expect.stringContaining('pagepulse_session='),
+      ]),
+    );
+    expect(response.body).not.toContain(challengeToken);
+    expect(authentication.totp.completeLogin).toHaveBeenCalledWith(challengeToken, {
+      code: '123456',
+    });
+  });
+
+  it('enrolls TOTP only for the current session and displays recovery codes once', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(activeSession),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const enrollment = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/totp/enrollments',
+      headers: { cookie },
+    });
+    const confirmation = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/totp/enrollments/confirm',
+      headers: { cookie },
+      payload: { code: '123456' },
+    });
+
+    expect(enrollment.statusCode).toBe(200);
+    expect(enrollment.headers['cache-control']).toBe('no-store');
+    expect(enrollment.json()).toEqual({
+      manualEntryKey: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+      otpauthUri:
+        'otpauth://totp/PagePulse%3Aowner%40example.test?secret=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
+    });
+    expect(confirmation.statusCode).toBe(200);
+    expect(confirmation.json()).toEqual({ recoveryCodes: ['ABCD-EFGH-JKLM'] });
+    expect(authentication.totp.confirmEnrollment).toHaveBeenCalledWith(
+      'owner-id',
+      'session-id',
+      '123456',
+    );
+  });
+
+  it('requires a fresh factor proof to replace recovery codes or disable TOTP', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(activeSession),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const replacement = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/totp/recovery-codes',
+      headers: { cookie },
+      payload: { recoveryCode: 'ABCD-EFGH-JKLM' },
+    });
+    const disabled = await testApp.inject({
+      method: 'DELETE',
+      url: '/api/v1/account/totp',
+      headers: { cookie },
+      payload: { code: '123456' },
+    });
+
+    expect(replacement.statusCode).toBe(200);
+    expect(replacement.json()).toEqual({ recoveryCodes: ['ABCD-EFGH-JKLM'] });
+    expect(authentication.totp.replaceRecoveryCodes).toHaveBeenCalledWith(
+      'owner-id',
+      'session-id',
+      { recoveryCode: 'ABCD-EFGH-JKLM' },
+    );
+    expect(disabled.statusCode).toBe(204);
+    expect(authentication.totp.disable).toHaveBeenCalledWith('owner-id', 'session-id', {
+      code: '123456',
+    });
   });
 
   it('lists the current active session without exposing its token', async () => {

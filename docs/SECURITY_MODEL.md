@@ -10,7 +10,13 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
   least 12 characters; hash parameters are bounded by startup validation and encoded with each hash for future rehash.
 - Email verification and short-lived, single-use password reset tokens use 256 bits of entropy and are stored only as
   SHA-256 digests. Issuing a replacement revokes the prior unused token of that type.
-- Optional RFC 6238 TOTP with encrypted secret and hashed single-use recovery codes.
+- Optional RFC 6238 TOTP uses six digits, SHA-1 and 30-second steps. The validator accepts the current or immediately
+  previous step, records a successful step to prevent reuse, and rate-limits all factor proofs separately from password
+  sign-in. A verified password creates only a five-minute, HTTP-only challenge cookie until the factor succeeds.
+- TOTP secrets are AES-256-GCM encrypted with a key derived from `TOTP_ENCRYPTION_KEK`, a fresh 96-bit nonce, and
+  authenticated user/version context. Recovery codes have 60 bits of randomness, are returned only at enrollment or
+  explicit replacement, and are stored only as user-bound HMAC-SHA-256 digests. Enabling, disabling, or replacing
+  recovery codes revokes every other browser session.
 - Server-side sessions use 256-bit opaque cookies stored only as SHA-256 digests in MariaDB. Cookies are host-only,
   HTTP-only and `SameSite=Strict`; production cookies are also `Secure`. Successful login replaces the prior browser
   session, password reset revokes all sessions, and members can revoke individual or all other active sessions.

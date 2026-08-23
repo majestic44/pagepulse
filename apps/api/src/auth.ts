@@ -15,21 +15,28 @@ import {
   redeemInvitation,
   redeemOwnerSetup,
   resetPassword,
+  hasTotpMethod,
   verifyEmailAddress,
   withAuthenticationTransaction,
 } from '@pagepulse/db';
 
 import type { SessionService } from './session.js';
+import type { TotpService } from './totp.js';
 
 export type AuthenticationTokenIssue = Readonly<{
   expiresAt: Date;
   token: string;
 }>;
 
+export type AuthenticationLogin = Readonly<{
+  totpEnabled: boolean;
+  user: AuthenticationUser;
+}>;
+
 export type AuthenticationService = Readonly<{
   completePasswordReset: (token: string, password: string) => Promise<void>;
   confirmEmailVerification: (token: string) => Promise<void>;
-  login: (email: string, password: string) => Promise<AuthenticationUser | undefined>;
+  login: (email: string, password: string) => Promise<AuthenticationLogin | undefined>;
   redeemInvitation: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   redeemOwnerSetup: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   requestPasswordReset: (email: string) => Promise<AuthenticationTokenIssue | undefined>;
@@ -102,7 +109,13 @@ export async function createAuthenticationService({
         password,
         user?.passwordHash ?? dummyPasswordHash,
       );
-      return passwordMatches && hasActiveVerifiedPassword(user) ? user : undefined;
+      if (!passwordMatches || !user || !hasActiveVerifiedPassword(user)) {
+        return undefined;
+      }
+      const totpEnabled = await withAuthenticationTransaction(pool, (connection) =>
+        hasTotpMethod(connection, user.id),
+      );
+      return { totpEnabled, user };
     },
 
     async redeemInvitation(token, password) {
@@ -145,6 +158,7 @@ export type AuthenticationRateLimitPolicies = Readonly<{
   login: Readonly<{ limit: number; windowMs: number }>;
   redemption: Readonly<{ limit: number; windowMs: number }>;
   reset: Readonly<{ limit: number; windowMs: number }>;
+  totp: Readonly<{ limit: number; windowMs: number }>;
 }>;
 
 export type AuthenticationDependencies = Readonly<{
@@ -152,4 +166,5 @@ export type AuthenticationDependencies = Readonly<{
   rateLimitStore: RateLimitStore;
   service: AuthenticationService;
   sessions: SessionService;
+  totp: TotpService;
 }>;
