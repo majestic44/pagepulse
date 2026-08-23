@@ -5,7 +5,9 @@
 - `users`: email, password hash, verification state, timezone, theme, status, deletion deadline.
 - `owner_setup_tokens`: one SHA-256 token digest bound to the pending owner, with expiry, redemption and revocation timestamps. Plaintext setup tokens are never stored.
 - `roles`: fixed `owner` and `member` roles for v1.
-- `invitations`: hashed token, inviter, email, expiry and redemption state.
+- `invitations`: SHA-256 token digest, inviter, canonical email, expiry, redemption and revocation state.
+- `account_tokens`: SHA-256 digest for a short-lived, single-use email-verification or password-reset token, with
+  expiry, use and revocation timestamps. Issuing a token of either type revokes the prior unused token for that user.
 - `sessions`: hashed token, device metadata, last used, expiry and revocation.
 - `totp_methods`: encrypted secret, recovery-code hashes and timestamps.
 - `personal_access_tokens`: prefix, token hash, scopes, expiry, rate tier, last-used IP/time and revocation.
@@ -50,3 +52,6 @@
 - The migration runner obtains the `pagepulse_migrations` MariaDB advisory lock before applying SQL migrations.
 - Each successful migration run records the schema version, migration identifier, compatible application versions, and deployed application version in `schema_compatibility`.
 - Every migration requires a restore/rollback note even when the database change itself is not reversed.
+- Migration `0003_tired_thunderbolt_ross` is additive: it adds account authentication fields to `users`, plus
+  `invitations` and `account_tokens`. Rollback is a reviewed restore from a verified pre-migration backup after the
+  authentication endpoints are disabled; it must not be dropped in place on a live deployment.

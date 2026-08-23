@@ -3,6 +3,9 @@ import { index, int, mysqlEnum, mysqlTable, timestamp, varchar } from 'drizzle-o
 export const users = mysqlTable('users', {
   id: varchar('id', { length: 36 }).primaryKey(),
   email: varchar('email', { length: 320 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 512 }),
+  emailVerifiedAt: timestamp('email_verified_at'),
+  passwordChangedAt: timestamp('password_changed_at'),
   role: mysqlEnum('role', ['owner', 'member']).notNull().default('member'),
   status: mysqlEnum('status', ['invited', 'active', 'suspended', 'deleting'])
     .notNull()
@@ -27,6 +30,50 @@ export const ownerSetupTokens = mysqlTable(
   (table) => [
     index('owner_setup_tokens_owner_state_idx').on(
       table.ownerId,
+      table.usedAt,
+      table.revokedAt,
+      table.expiresAt,
+    ),
+  ],
+);
+
+export const invitations = mysqlTable(
+  'invitations',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    email: varchar('email', { length: 320 }).notNull(),
+    invitedByUserId: varchar('invited_by_user_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    redeemedAt: timestamp('redeemed_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('invitations_email_state_idx').on(table.email, table.redeemedAt, table.revokedAt),
+  ],
+);
+
+export const accountTokens = mysqlTable(
+  'account_tokens',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    userId: varchar('user_id', { length: 36 })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: mysqlEnum('type', ['email_verification', 'password_reset']).notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('account_tokens_user_type_state_idx').on(
+      table.userId,
+      table.type,
       table.usedAt,
       table.revokedAt,
       table.expiresAt,

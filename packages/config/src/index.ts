@@ -27,6 +27,32 @@ const environmentSchema = z
     APP_VERSION: z.string().trim().min(1).max(128).default('0.0.0-dev'),
     APP_BASE_URL: z.url().optional(),
     OWNER_SETUP_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(30),
+    AUTH_ARGON2_MEMORY_KIB: z.coerce.number().int().min(8).max(1_048_576).default(65_536),
+    AUTH_ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
+    AUTH_ARGON2_PASSES: z.coerce.number().int().min(1).max(10).default(3),
+    EMAIL_VERIFICATION_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(10_080).default(1_440),
+    PASSWORD_RESET_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(60),
+    AUTH_LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(5),
+    AUTH_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(900_000),
+    AUTH_RESET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(3),
+    AUTH_RESET_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(3_600_000),
+    AUTH_REDEMPTION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(5),
+    AUTH_REDEMPTION_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(3_600_000),
     LOG_LEVEL: z.enum(logLevels).default('info'),
     DATABASE_URL: z.url().default('mysql://pagepulse:pagepulse@localhost:3306/pagepulse'),
     REDIS_URL: z.url().default('redis://localhost:6379/0'),
@@ -62,6 +88,13 @@ const environmentSchema = z
         code: 'custom',
         message: 'BROWSER_CONCURRENCY_MIN must not exceed BROWSER_CONCURRENCY_MAX',
         path: ['BROWSER_CONCURRENCY_MIN'],
+      });
+    }
+    if (environment.AUTH_ARGON2_MEMORY_KIB < 8 * environment.AUTH_ARGON2_PARALLELISM) {
+      context.addIssue({
+        code: 'custom',
+        message: 'AUTH_ARGON2_MEMORY_KIB must be at least 8 times AUTH_ARGON2_PARALLELISM',
+        path: ['AUTH_ARGON2_MEMORY_KIB'],
       });
     }
     if (environment.NODE_ENV === 'production' && environment.APP_BASE_URL?.startsWith('http://')) {

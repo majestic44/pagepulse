@@ -31,6 +31,8 @@ describe('loadEnvironment', () => {
       REDIS_URL: 'redis://localhost:6379/0',
       SCHEDULER_RECONCILIATION_INTERVAL_MS: 300_000,
       OWNER_SETUP_TOKEN_TTL_MINUTES: 30,
+      AUTH_ARGON2_MEMORY_KIB: 65_536,
+      AUTH_LOGIN_RATE_LIMIT_MAX: 5,
     });
   });
 
@@ -47,6 +49,21 @@ describe('loadEnvironment', () => {
     expect(validationError).toBeInstanceOf(EnvironmentValidationError);
     expect(validationError?.issues).toContainEqual(
       expect.objectContaining({ path: ['OWNER_SETUP_TOKEN_TTL_MINUTES'] }),
+    );
+  });
+
+  it('rejects Argon2 settings with too little memory for the requested parallelism', () => {
+    let validationError: EnvironmentValidationError | undefined;
+    try {
+      loadEnvironment({ AUTH_ARGON2_MEMORY_KIB: '8', AUTH_ARGON2_PARALLELISM: '2' });
+    } catch (error) {
+      if (error instanceof EnvironmentValidationError) {
+        validationError = error;
+      }
+    }
+
+    expect(validationError?.issues).toContainEqual(
+      expect.objectContaining({ path: ['AUTH_ARGON2_MEMORY_KIB'] }),
     );
   });
 
