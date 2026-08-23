@@ -113,11 +113,26 @@ export async function withOwnerBootstrapLock<T>(
   operation: () => Promise<T>,
 ) {
   await acquireOwnerBootstrapLock(connection);
+  let operationFailed = false;
+  let operationError: unknown;
+  let result: T | undefined;
   try {
-    return await operation();
-  } finally {
-    await releaseOwnerBootstrapLock(connection);
+    result = await operation();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
   }
+  try {
+    await releaseOwnerBootstrapLock(connection);
+  } catch (error) {
+    if (!operationFailed) {
+      throw error;
+    }
+  }
+  if (operationFailed) {
+    throw operationError;
+  }
+  return result as T;
 }
 
 function parseExistingOwner(row: RowDataPacket) {
@@ -134,6 +149,14 @@ function parseExistingOwner(row: RowDataPacket) {
     throw new OwnerBootstrapConfigurationError('existing owner record is invalid');
   }
   return { email, id, status };
+}
+
+function normalizeExistingOwnerEmail(email: string) {
+  try {
+    return normalizeOwnerEmail(email);
+  } catch {
+    throw new OwnerBootstrapConfigurationError('existing owner email is invalid');
+  }
 }
 
 export async function createOwnerBootstrap(
@@ -161,7 +184,7 @@ export async function createOwnerBootstrap(
       if (existingOwner.status !== 'invited') {
         throw new OwnerBootstrapAlreadyConfiguredError();
       }
-      if (existingOwner.email !== email) {
+      if (normalizeExistingOwnerEmail(existingOwner.email) !== email) {
         throw new OwnerBootstrapPendingOwnerMismatchError();
       }
       ownerId = existingOwner.id;

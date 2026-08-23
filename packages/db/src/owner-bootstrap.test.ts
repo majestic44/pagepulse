@@ -17,6 +17,7 @@ import {
 
 function createConnection(
   existingOwner: { email: string; id: string; status: string } | undefined = undefined,
+  releaseLockFailure = false,
 ) {
   const query = vi.fn((sql: string, _parameters?: unknown[]) => {
     void _parameters;
@@ -25,6 +26,9 @@ function createConnection(
     }
     if (sql.startsWith("SELECT id, email, status FROM users WHERE role = 'owner'")) {
       return Promise.resolve([existingOwner ? [existingOwner] : [], []]);
+    }
+    if (releaseLockFailure && sql.startsWith('SELECT RELEASE_LOCK')) {
+      return Promise.reject(new Error('lock release failed'));
     }
     return Promise.resolve([[], []]);
   });
@@ -106,7 +110,7 @@ describe('owner bootstrap', () => {
 
   it('rotates an unredeemed setup token for the same pending owner', async () => {
     const { connection, query } = createConnection({
-      email: 'owner@example.test',
+      email: 'Owner@Example.Test',
       id: 'pending-owner',
       status: 'invited',
     });
@@ -139,6 +143,25 @@ describe('owner bootstrap', () => {
         createOwnerBootstrap(connection, { email: 'other@example.test', tokenTtlMinutes: 30 }),
       ),
     ).rejects.toBeInstanceOf(OwnerBootstrapPendingOwnerMismatchError);
+
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a bootstrap failure when advisory-lock release also fails', async () => {
+    const { connection, rollback } = createConnection(
+      {
+        email: 'owner@example.test',
+        id: 'existing-owner',
+        status: 'active',
+      },
+      true,
+    );
+
+    await expect(
+      withOwnerBootstrapLock(connection, () =>
+        createOwnerBootstrap(connection, { email: 'owner@example.test', tokenTtlMinutes: 30 }),
+      ),
+    ).rejects.toBeInstanceOf(OwnerBootstrapAlreadyConfiguredError);
 
     expect(rollback).toHaveBeenCalledOnce();
   });
