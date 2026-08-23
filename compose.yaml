@@ -75,8 +75,6 @@ services:
     environment:
       <<: *app-environment
       PORT: 3000
-      OWNER_DIAGNOSTICS_TOKEN:
-      OWNER_DIAGNOSTICS_TOKEN_FILE:
     read_only: true
     tmpfs: [/tmp]
     healthcheck:

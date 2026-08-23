@@ -1,6 +1,6 @@
 # ADR 0004: Public Health and Restricted Diagnostics Boundary
 
-- Status: Accepted
+- Status: Superseded by ADR 0008
 - Date: 2026-08-22
 
 ## Decision
@@ -12,6 +12,6 @@ route guarded by a file-backed `OWNER_DIAGNOSTICS_TOKEN` until Phase 2 owner-ses
 ## Consequences
 
 Load balancers can distinguish a live API process from a ready service without learning infrastructure details.
-Operators can diagnose dependency state before account bootstrap exists, but must store the temporary token as a
-secret and rotate or remove it when owner-session authorization replaces the guard. Worker containers report unhealthy
-when they cannot reach Redis, rather than merely when their main process exits.
+This temporary bootstrap authorization was retired once owner-session authorization became available in Phase 2;
+ADR 0008 records its replacement. Worker containers report unhealthy when they cannot reach Redis, rather than merely
+when their main process exits.

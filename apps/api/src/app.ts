@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import { Type } from '@sinclair/typebox';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
@@ -15,6 +14,8 @@ import {
   AuthenticationStateError,
   AuthenticationTokenError,
   createDatabasePool,
+  MemberLifecycleStateError,
+  MemberNotFoundError,
   probeDatabase,
   type ActiveSession,
 } from '@pagepulse/db';
@@ -24,9 +25,14 @@ import {
   AuthenticationUnavailableResponse,
   AuthenticationCredentials,
   DiagnosticsResponse,
+  ForbiddenResponse,
   HealthResponse,
   InvalidAuthenticationRequestResponse,
   LoginRequest,
+  ManagedMembersResponse,
+  MemberIdParameters,
+  MemberLifecycleConflictResponse,
+  NotFoundResponse,
   PasswordResetRequest,
   RecoveryCodesResponse,
   SessionIdParameters,
@@ -46,6 +52,7 @@ import {
   type AuthenticationRateLimitPolicies,
 } from './auth.js';
 import { createHealthService, type HealthService } from './health.js';
+import { createMemberService } from './members.js';
 import {
   clearSessionCookie,
   createSessionService,
@@ -73,12 +80,6 @@ type DefaultAuthenticationDependencies = AuthenticationDependencies &
   }>;
 
 type AuthenticationRateLimitScope = keyof AuthenticationRateLimitPolicies;
-
-function hasOwnerDiagnosticsAccess(authorization: string | undefined, token: string) {
-  const expected = Buffer.from(`Bearer ${token}`);
-  const received = Buffer.from(authorization ?? '');
-  return expected.length === received.length && timingSafeEqual(expected, received);
-}
 
 function authenticationRateLimitPolicies(
   environment: Environment,
@@ -126,6 +127,7 @@ async function createDefaultAuthenticationDependencies(
       rateLimitPolicies: authenticationRateLimitPolicies(environment),
       rateLimitStore: new RedisFixedWindowRateLimitStore(redis),
       service,
+      members: createMemberService({ pool }),
       sessions: createSessionService({
         pool,
         timing: {
@@ -172,7 +174,12 @@ export async function buildApp(options: BuildAppOptions = {}) {
     await defaultAuthentication?.close();
   });
   app.addHook('onRequest', async (request, reply) => {
-    if (request.url.startsWith('/api/v1/auth/') || request.url.startsWith('/api/v1/account/')) {
+    if (
+      request.url.startsWith('/api/v1/auth/') ||
+      request.url.startsWith('/api/v1/account/') ||
+      request.url.startsWith('/api/v1/owner/') ||
+      request.url.startsWith('/api/v1/system/diagnostics')
+    ) {
       reply.header('Cache-Control', 'no-store');
     }
   });
@@ -203,26 +210,6 @@ export async function buildApp(options: BuildAppOptions = {}) {
     version: env.APP_VERSION,
     uptimeSeconds: Math.floor((now() - started) / 1000),
   }));
-
-  if (env.OWNER_DIAGNOSTICS_TOKEN) {
-    app.get(
-      '/api/v1/system/diagnostics',
-      {
-        preHandler: async (request, reply) => {
-          if (
-            !hasOwnerDiagnosticsAccess(request.headers.authorization, env.OWNER_DIAGNOSTICS_TOKEN!)
-          ) {
-            return reply.code(401).send({ error: 'Unauthorized' });
-          }
-        },
-        schema: { response: { 200: DiagnosticsResponse, 401: UnauthorizedResponse } },
-      },
-      async () => {
-        const diagnostics = await healthService.collectDiagnostics();
-        return { ...serviceHealth(diagnostics.status), dependencies: diagnostics.dependencies };
-      },
-    );
-  }
 
   async function getRateLimitedAuthentication(
     scope: AuthenticationRateLimitScope,
@@ -264,6 +251,16 @@ export async function buildApp(options: BuildAppOptions = {}) {
     idleExpiresAt: session.idleExpiresAt.toISOString(),
     lastUsedAt: session.lastUsedAt.toISOString(),
   });
+  const serializeManagedMember = (
+    member: Awaited<ReturnType<AuthenticationDependencies['members']['list']>>[number],
+  ) => ({
+    createdAt: member.createdAt.toISOString(),
+    email: member.email,
+    emailVerified: member.emailVerified,
+    id: member.id,
+    monitorLimit: member.monitorLimit,
+    status: member.status,
+  });
 
   async function getCurrentSession(request: FastifyRequest, reply: FastifyReply) {
     const token = readSessionCookie(request.headers.cookie);
@@ -286,12 +283,46 @@ export async function buildApp(options: BuildAppOptions = {}) {
     }
   }
 
+  async function getCurrentOwnerSession(request: FastifyRequest, reply: FastifyReply) {
+    const current = await getCurrentSession(request, reply);
+    if (!current) {
+      return undefined;
+    }
+    if (current.session.role !== 'owner') {
+      reply.code(403).send({ error: 'Forbidden' });
+      return undefined;
+    }
+    return current;
+  }
+
   const invalidAuthenticationResponse = { error: 'Invalid authentication request' } as const;
   const isInvalidAuthenticationRequest = (error: unknown) =>
     error instanceof AuthenticationTokenError ||
     error instanceof AuthenticationStateError ||
     error instanceof EmailValidationError ||
     error instanceof PasswordValidationError;
+
+  app.get(
+    '/api/v1/system/diagnostics',
+    {
+      schema: {
+        response: {
+          200: DiagnosticsResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentOwnerSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const diagnostics = await healthService.collectDiagnostics();
+      return { ...serviceHealth(diagnostics.status), dependencies: diagnostics.dependencies };
+    },
+  );
 
   app.post<{ Body: { password: string; token: string } }>(
     '/api/v1/auth/owner-setup',
@@ -856,6 +887,117 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
       }
     },
+  );
+
+  app.get(
+    '/api/v1/owner/members',
+    {
+      schema: {
+        response: {
+          200: ManagedMembersResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentOwnerSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const members = await current.authentication.members.list();
+        return { members: members.map(serializeManagedMember) };
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  async function completeOwnerMemberAction(
+    request: FastifyRequest<{ Params: { memberId: string } }>,
+    reply: FastifyReply,
+    action: (authentication: AuthenticationDependencies, memberId: string) => Promise<void>,
+  ) {
+    const current = await getCurrentOwnerSession(request, reply);
+    if (!current) {
+      return reply;
+    }
+    try {
+      await action(current.authentication, request.params.memberId);
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof MemberNotFoundError) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      if (error instanceof MemberLifecycleStateError) {
+        return reply.code(409).send({ error: 'Member lifecycle action cannot be completed' });
+      }
+      return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+    }
+  }
+
+  app.post<{ Params: { memberId: string } }>(
+    '/api/v1/owner/members/:memberId/suspend',
+    {
+      schema: {
+        params: MemberIdParameters,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MemberLifecycleConflictResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    (request, reply) =>
+      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
+        authentication.members.suspend(memberId),
+      ),
+  );
+
+  app.post<{ Params: { memberId: string } }>(
+    '/api/v1/owner/members/:memberId/reactivate',
+    {
+      schema: {
+        params: MemberIdParameters,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MemberLifecycleConflictResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    (request, reply) =>
+      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
+        authentication.members.reactivate(memberId),
+      ),
+  );
+
+  app.delete<{ Params: { memberId: string } }>(
+    '/api/v1/owner/members/:memberId',
+    {
+      schema: {
+        params: MemberIdParameters,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    (request, reply) =>
+      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
+        authentication.members.remove(memberId),
+      ),
   );
 
   return app;

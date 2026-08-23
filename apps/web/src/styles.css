@@ -294,6 +294,36 @@ h3 {
   justify-content: space-between;
   padding: 1.2rem;
 }
+.member-list {
+  display: grid;
+  gap: 0.9rem;
+  list-style: none;
+  margin: 2rem 0 0;
+  padding: 0;
+}
+.member-list li {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1.2rem;
+}
+.member-list h2 {
+  font-size: 1.2rem;
+}
+.member-list p {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+.member-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: flex-end;
+}
 .session-list h2 {
   font-size: 1.2rem;
 }
@@ -345,6 +375,13 @@ h3 {
   .session-list li {
     align-items: stretch;
     flex-direction: column;
+  }
+  .member-list li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .member-actions {
+    justify-content: flex-start;
   }
   .session-list button {
     align-self: start;

@@ -26,9 +26,8 @@ Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, 
   otherwise `503`, and never includes connection errors or configuration values. Individual dependency probes are
   bounded so a stalled connection reports degraded health promptly.
 - `GET /api/v1/system/version` is public and returns only the service name, application version and uptime.
-- `GET /api/v1/system/diagnostics` is not registered unless `OWNER_DIAGNOSTICS_TOKEN` is configured. It requires
-  that token as a Bearer credential and returns safe dependency status labels only. Phase 2 owner-session
-  authorization will replace this bootstrap guard.
+- `GET /api/v1/system/diagnostics` requires an authenticated owner browser session and returns safe dependency status
+  labels only. It is always registered so access policy is stable, but signed-out and member callers cannot access it.
 - Worker container health checks require both a live worker process and a successful Redis probe.
 - The gateway re-resolves the API's internal Compose DNS name for proxied requests, so an API container can be
   recreated without leaving the gateway bound to a stale container address.

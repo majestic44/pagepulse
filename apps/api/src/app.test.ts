@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PasswordValidationError, type RateLimitStore } from '@pagepulse/auth';
 import { loadEnvironment } from '@pagepulse/config';
-import type { ActiveSession, AuthenticationUser } from '@pagepulse/db';
+import {
+  MemberLifecycleStateError,
+  type ActiveSession,
+  type AuthenticationUser,
+} from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
+import type { MemberService } from './members.js';
 import type { SessionService } from './session.js';
 import type { TotpService } from './totp.js';
 
@@ -18,8 +23,16 @@ function createAuthenticationDependencies(
   },
   sessions: Partial<SessionService> = {},
   totp: Partial<TotpService> = {},
+  members: Partial<MemberService> = {},
 ): AuthenticationDependencies {
   return {
+    members: {
+      list: vi.fn().mockResolvedValue([]),
+      reactivate: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+      suspend: vi.fn().mockResolvedValue(undefined),
+      ...members,
+    },
     rateLimitPolicies: {
       login: { limit: 5, windowMs: 60_000 },
       redemption: { limit: 5, windowMs: 60_000 },
@@ -99,6 +112,13 @@ const activeSession: ActiveSession = {
   userId: authenticatedUser.id,
 };
 
+const memberSession: ActiveSession = {
+  ...activeSession,
+  email: 'member@example.test',
+  role: 'member',
+  userId: 'member-id',
+};
+
 describe('health contract', () => {
   it('returns liveness without probing dependencies', async () => {
     const database = vi.fn().mockResolvedValue(undefined);
@@ -171,10 +191,13 @@ describe('health contract', () => {
     expect(response.body).not.toContain('database password must stay private');
   });
 
-  it('restricts detailed diagnostics to the configured owner token', async () => {
-    const token = 'diagnostics-owner-token';
+  it('restricts detailed diagnostics to an owner session', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(activeSession),
+    });
     const testApp = await buildApp({
-      environment: loadEnvironment({ APP_VERSION: '1.2.3', OWNER_DIAGNOSTICS_TOKEN: token }),
+      authentication,
+      environment: loadEnvironment({ APP_VERSION: '1.2.3' }),
       healthService: createHealthService({
         database: vi.fn().mockResolvedValue(undefined),
         redis: vi.fn().mockRejectedValue(new Error('redis unavailable')),
@@ -184,23 +207,22 @@ describe('health contract', () => {
     app = testApp;
 
     await expect(
-      testApp.inject({ method: 'GET', url: '/api/v1/system/diagnostics' }),
-    ).resolves.toMatchObject({
-      statusCode: 401,
-    });
-    await expect(
       testApp.inject({
         method: 'GET',
         url: '/api/v1/system/diagnostics',
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: 'Bearer retired-diagnostics-token' },
       }),
-    ).resolves.toMatchObject({ statusCode: 200 });
+    ).resolves.toMatchObject({
+      statusCode: 401,
+    });
 
     const response = await testApp.inject({
       method: 'GET',
       url: '/api/v1/system/diagnostics',
-      headers: { authorization: `Bearer ${token}` },
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
     });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
     expect(response.json()).toEqual({
       status: 'degraded',
       service: 'api',
@@ -211,8 +233,12 @@ describe('health contract', () => {
     expect(response.body).not.toContain('redis unavailable');
   });
 
-  it('does not register diagnostics without an owner token', async () => {
+  it('forbids a member session from detailed diagnostics', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(memberSession),
+    });
     const testApp = await buildApp({
+      authentication,
       healthService: createHealthService({
         database: vi.fn().mockResolvedValue(undefined),
         redis: vi.fn().mockResolvedValue(undefined),
@@ -220,9 +246,14 @@ describe('health contract', () => {
     });
     app = testApp;
 
-    const response = await testApp.inject({ method: 'GET', url: '/api/v1/system/diagnostics' });
+    const response = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/system/diagnostics',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
   });
 });
 
@@ -490,5 +521,117 @@ describe('authentication contract', () => {
     expect(response.statusCode).toBe(204);
     expect(response.headers['set-cookie']).toContain('Max-Age=0');
     expect(authentication.sessions.revoke).toHaveBeenCalledWith('owner-id', 'session-id');
+  });
+
+  it('allows an owner to list and manage member lifecycle state', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      {
+        list: vi.fn().mockResolvedValue([
+          {
+            createdAt: new Date('2026-08-23T00:00:00.000Z'),
+            email: 'member@example.test',
+            emailVerified: true,
+            id: 'member-id',
+            monitorLimit: 50,
+            status: 'active',
+          },
+        ]),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const headers = { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' };
+
+    const listed = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/owner/members',
+      headers,
+    });
+    const suspended = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/owner/members/member-id/suspend',
+      headers,
+    });
+    const reactivated = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/owner/members/member-id/reactivate',
+      headers,
+    });
+    const removed = await testApp.inject({
+      method: 'DELETE',
+      url: '/api/v1/owner/members/member-id',
+      headers,
+    });
+
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers['cache-control']).toBe('no-store');
+    expect(listed.json()).toEqual({
+      members: [
+        {
+          createdAt: '2026-08-23T00:00:00.000Z',
+          email: 'member@example.test',
+          emailVerified: true,
+          id: 'member-id',
+          monitorLimit: 50,
+          status: 'active',
+        },
+      ],
+    });
+    expect(suspended.statusCode).toBe(204);
+    expect(reactivated.statusCode).toBe(204);
+    expect(removed.statusCode).toBe(204);
+    expect(authentication.members.suspend).toHaveBeenCalledWith('member-id');
+    expect(authentication.members.reactivate).toHaveBeenCalledWith('member-id');
+    expect(authentication.members.remove).toHaveBeenCalledWith('member-id');
+  });
+
+  it('forbids members from accessing owner member management', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(memberSession),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/owner/members',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: 'Forbidden' });
+    expect(authentication.members.list).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe conflict when a member lifecycle transition is no longer valid', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      {
+        suspend: vi
+          .fn()
+          .mockRejectedValue(
+            new MemberLifecycleStateError('only an active member can be suspended'),
+          ),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/owner/members/member-id/suspend',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'Member lifecycle action cannot be completed' });
+    expect(response.body).not.toContain('only an active member');
   });
 });
