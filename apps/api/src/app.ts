@@ -1,4 +1,4 @@
-import { Type } from '@sinclair/typebox';
+import { Type, type Static } from '@sinclair/typebox';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
 import {
@@ -24,10 +24,13 @@ import {
   MonitorLimitError,
   MonitorNotFoundError,
   MonitorRevisionConflictError,
+  MonitorScheduleNotFoundError,
+  MonitorScheduleValidationError,
   MonitorStateError,
   probeDatabase,
   type ActiveSession,
   type Monitor,
+  type MonitorSchedule,
 } from '@pagepulse/db';
 import {
   AccountDeletionConflictResponse,
@@ -44,6 +47,7 @@ import {
   ForbiddenResponse,
   HealthResponse,
   InvalidMonitorRequestResponse,
+  InvalidMonitorScheduleRequestResponse,
   InvalidAuthenticationRequestResponse,
   InvalidAccountDeletionConfirmationResponse,
   LoginRequest,
@@ -55,6 +59,8 @@ import {
   MonitorLimitResponse,
   MonitorMutationConflictResponse,
   MonitorRevisionConflictResponse,
+  MonitorScheduleConfiguration,
+  MonitorScheduleResponse,
   MonitorSummary,
   MonitorsResponse,
   MonitorUnavailableResponse,
@@ -308,6 +314,13 @@ export async function buildApp(options: BuildAppOptions = {}) {
     state: monitor.state,
     url: monitor.url,
   });
+  const serializeMonitorSchedule = (schedule: MonitorSchedule) => ({
+    customIntervalMinutes: schedule.customIntervalMinutes,
+    dailyTime: schedule.dailyTime,
+    hourlyMinute: schedule.hourlyMinute,
+    scheduleType: schedule.scheduleType,
+    timeZone: schedule.timeZone,
+  });
   const auditContext = (request: FastifyRequest) => ({
     requesterIpHash: hashAuditRequesterIp(request.ip),
     requestId: request.id,
@@ -351,6 +364,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     error: 'Invalid account deletion confirmation',
   } as const;
   const invalidMonitorResponse = { error: 'Invalid monitor request' } as const;
+  const invalidMonitorScheduleResponse = { error: 'Invalid monitor schedule' } as const;
   const monitorLimitResponse = { error: 'Monitor limit reached' } as const;
   const monitorRevisionConflictResponse = { error: 'Monitor has changed' } as const;
   const monitorStateConflictResponse = { error: 'Monitor state cannot be changed' } as const;
@@ -380,10 +394,16 @@ export async function buildApp(options: BuildAppOptions = {}) {
     if (error instanceof MonitorInputError) {
       return reply.code(400).send(invalidMonitorResponse);
     }
+    if (error instanceof MonitorScheduleValidationError) {
+      return reply.code(400).send(invalidMonitorScheduleResponse);
+    }
     if (error instanceof MonitorLimitError) {
       return reply.code(409).send(monitorLimitResponse);
     }
     if (error instanceof MonitorNotFoundError) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+    if (error instanceof MonitorScheduleNotFoundError) {
       return reply.code(404).send({ error: 'Not found' });
     }
     if (error instanceof MonitorRevisionConflictError) {
@@ -1123,6 +1143,125 @@ export async function buildApp(options: BuildAppOptions = {}) {
           .code(201)
           .header('ETag', `"${monitor.revision}"`)
           .send(serializeMonitor(monitor));
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/schedule',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorScheduleResponse,
+          400: InvalidMonitorScheduleRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const result = await current.authentication.monitors.getSchedule(
+          current.session.userId,
+          request.params.monitorId,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          schedule: result.schedule ? serializeMonitorSchedule(result.schedule) : null,
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.put<{ Body: Static<typeof MonitorScheduleConfiguration>; Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/schedule',
+    {
+      schema: {
+        body: MonitorScheduleConfiguration,
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorScheduleResponse,
+          400: InvalidMonitorScheduleRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorScheduleResponse);
+      }
+      try {
+        const result = await current.authentication.monitors.updateSchedule(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+          request.body,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          schedule: serializeMonitorSchedule(result.schedule),
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.delete<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/schedule',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorScheduleResponse,
+          400: InvalidMonitorScheduleRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorScheduleResponse);
+      }
+      try {
+        const monitor = await current.authentication.monitors.deleteSchedule(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+        );
+        return reply.header('ETag', `"${monitor.revision}"`).send({
+          monitor: serializeMonitor(monitor),
+          schedule: null,
+        });
       } catch (error) {
         return sendMonitorError(reply, error);
       }

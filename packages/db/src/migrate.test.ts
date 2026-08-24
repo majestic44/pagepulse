@@ -4,11 +4,22 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  currentSchemaCompatibility,
   MIGRATION_LOCK_NAME,
   MIGRATION_LOCK_TIMEOUT_SECONDS,
   isMigrationEntrypoint,
   withMigrationLock,
 } from './migrate.js';
+
+describe('current schema compatibility', () => {
+  it('records the monitor schedule configuration migration', () => {
+    expect(currentSchemaCompatibility).toEqual({
+      migrationId: 'monitor-schedule-configuration',
+      minimumAppVersion: '0.0.0',
+      schemaVersion: 9,
+    });
+  });
+});
 
 function createConnection(acquired: number | null) {
   const query = vi

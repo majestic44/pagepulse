@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './client.js';
 import {
-  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
   MonitorScheduleValidationError,
   upsertMonitorSchedule,
 } from './schedules.js';
@@ -10,9 +10,13 @@ import { monitorSchedules } from './schema.js';
 
 const schedule = {
   correlationId: 'correlation_1',
-  everyMilliseconds: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+  customIntervalMinutes: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
+  dailyTime: null,
+  hourlyMinute: null,
   monitorId: 'monitor_1',
   monitorRevision: 1,
+  scheduleType: 'custom' as const,
+  timeZone: 'UTC',
 };
 
 describe('monitor schedule registry', () => {
@@ -28,9 +32,14 @@ describe('monitor schedule registry', () => {
     expect(insert).toHaveBeenCalledWith(monitorSchedules);
     expect(values).toHaveBeenCalledWith({
       correlationId: schedule.correlationId,
-      intervalMs: schedule.everyMilliseconds,
+      customIntervalMinutes: schedule.customIntervalMinutes,
+      dailyTime: null,
+      hourlyMinute: null,
+      intervalMs: schedule.customIntervalMinutes * 60_000,
       monitorId: schedule.monitorId,
       monitorRevision: schedule.monitorRevision,
+      scheduleType: 'custom',
+      timeZone: 'UTC',
     });
   });
 
@@ -40,7 +49,7 @@ describe('monitor schedule registry', () => {
     await expect(
       upsertMonitorSchedule({ insert } as unknown as Database, {
         ...schedule,
-        everyMilliseconds: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS - 1,
+        customIntervalMinutes: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES - 1,
       }),
     ).rejects.toBeInstanceOf(MonitorScheduleValidationError);
 

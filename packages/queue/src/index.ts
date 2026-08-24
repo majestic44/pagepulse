@@ -154,13 +154,20 @@ export async function publishPendingNotificationOutboxEvents(
 }
 
 export const MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS = 3_600_000;
+export const MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES =
+  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS / 60_000;
+export const MAXIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES = Math.floor(2_147_483_647 / 60_000);
 const monitorSchedulerIdPrefix = 'monitor-';
 
 export type MonitorScheduleDefinition = Readonly<{
   correlationId: string;
-  everyMilliseconds: number;
+  customIntervalMinutes: number | null;
+  dailyTime: string | null;
+  hourlyMinute: number | null;
   monitorId: string;
   monitorRevision: number;
+  scheduleType: 'custom' | 'daily' | 'hourly';
+  timeZone: string;
 }>;
 
 export type SchedulerReconciliationResult = Readonly<{
@@ -186,14 +193,71 @@ function validateMonitorSchedule(schedule: MonitorScheduleDefinition) {
     monitorRevision: schedule.monitorRevision,
     version: 1,
   });
-  if (
-    !Number.isSafeInteger(schedule.everyMilliseconds) ||
-    schedule.everyMilliseconds < MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS
-  ) {
-    throw new MonitorScheduleValidationError(
-      `everyMilliseconds must be an integer of at least ${MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS}`,
-    );
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: schedule.timeZone });
+  } catch {
+    throw new MonitorScheduleValidationError('timeZone must be a valid IANA time zone');
   }
+  if (schedule.scheduleType === 'custom') {
+    const customIntervalMinutes = schedule.customIntervalMinutes;
+    if (
+      typeof customIntervalMinutes !== 'number' ||
+      !Number.isSafeInteger(customIntervalMinutes) ||
+      customIntervalMinutes < MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES ||
+      customIntervalMinutes > MAXIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES ||
+      schedule.dailyTime !== null ||
+      schedule.hourlyMinute !== null
+    ) {
+      throw new MonitorScheduleValidationError(
+        'custom schedules require a bounded whole-minute interval',
+      );
+    }
+    return;
+  }
+  if (schedule.scheduleType === 'hourly') {
+    const hourlyMinute = schedule.hourlyMinute;
+    if (
+      typeof hourlyMinute !== 'number' ||
+      !Number.isSafeInteger(hourlyMinute) ||
+      hourlyMinute < 0 ||
+      hourlyMinute > 59 ||
+      schedule.customIntervalMinutes !== null ||
+      schedule.dailyTime !== null
+    ) {
+      throw new MonitorScheduleValidationError(
+        'hourly schedules require a minute from 0 through 59',
+      );
+    }
+    return;
+  }
+  if (
+    schedule.scheduleType !== 'daily' ||
+    typeof schedule.dailyTime !== 'string' ||
+    !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/u.test(schedule.dailyTime) ||
+    schedule.customIntervalMinutes !== null ||
+    schedule.hourlyMinute !== null
+  ) {
+    throw new MonitorScheduleValidationError('daily schedules require a 24-hour HH:MM time');
+  }
+}
+
+function repeatOptions(schedule: MonitorScheduleDefinition) {
+  if (schedule.scheduleType === 'custom') {
+    const customIntervalMinutes = schedule.customIntervalMinutes;
+    if (customIntervalMinutes === null) {
+      throw new MonitorScheduleValidationError('custom schedules require an interval');
+    }
+    return { every: customIntervalMinutes * 60_000 };
+  }
+  if (schedule.scheduleType === 'hourly') {
+    const hourlyMinute = schedule.hourlyMinute;
+    if (hourlyMinute === null) {
+      throw new MonitorScheduleValidationError('hourly schedules require a minute');
+    }
+    return { pattern: `${hourlyMinute} * * * *`, tz: schedule.timeZone };
+  }
+  const [hour, minute] = schedule.dailyTime!.split(':');
+  return { pattern: `${minute} ${hour} * * *`, tz: schedule.timeZone };
 }
 
 export async function reconcileMonitorSchedules(
@@ -212,20 +276,16 @@ export async function reconcileMonitorSchedules(
 
   let upserted = 0;
   for (const schedule of schedules) {
-    await queue.upsertJobScheduler(
-      monitorJobSchedulerId(schedule),
-      { every: schedule.everyMilliseconds },
-      {
-        data: {
-          correlationId: schedule.correlationId,
-          monitorId: schedule.monitorId,
-          monitorRevision: schedule.monitorRevision,
-          version: 1,
-        },
-        name: QueueNames.monitorSchedule,
-        opts: { removeOnComplete: 1_000, removeOnFail: 1_000 },
+    await queue.upsertJobScheduler(monitorJobSchedulerId(schedule), repeatOptions(schedule), {
+      data: {
+        correlationId: schedule.correlationId,
+        monitorId: schedule.monitorId,
+        monitorRevision: schedule.monitorRevision,
+        version: 1,
       },
-    );
+      name: QueueNames.monitorSchedule,
+      opts: { removeOnComplete: 1_000, removeOnFail: 1_000 },
+    });
     upserted += 1;
   }
 

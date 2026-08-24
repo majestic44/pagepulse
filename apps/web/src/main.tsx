@@ -101,12 +101,28 @@ type MonitorSummary = Readonly<{
   url: string;
 }>;
 
+type MonitorScheduleType = 'custom' | 'daily' | 'hourly';
+
+type MonitorScheduleSummary = Readonly<{
+  customIntervalMinutes: number | null;
+  dailyTime: string | null;
+  hourlyMinute: number | null;
+  scheduleType: MonitorScheduleType;
+  timeZone: string;
+}>;
+
+type MonitorScheduleResponse = Readonly<{
+  monitor: MonitorSummary;
+  schedule: MonitorScheduleSummary | null;
+}>;
+
 type MonitorManagementState =
   | Readonly<{ kind: 'loading' }>
   | Readonly<{ kind: 'signed-out' }>
   | Readonly<{ kind: 'ready'; monitors: ReadonlyArray<MonitorSummary> }>;
 
 const pagePath = window.location.pathname;
+const defaultTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const oneTimeToken =
   pagePath === '/setup/owner' || pagePath === '/verify-email'
     ? (new URLSearchParams(window.location.search).get('token') ?? '')
@@ -764,6 +780,13 @@ function MonitorManagement() {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [editing, setEditing] = useState<MonitorSummary>();
+  const [scheduleTarget, setScheduleTarget] = useState<MonitorSummary>();
+  const [schedule, setSchedule] = useState<MonitorScheduleSummary | null>();
+  const [scheduleType, setScheduleType] = useState<MonitorScheduleType>('daily');
+  const [scheduleTimeZone, setScheduleTimeZone] = useState(defaultTimeZone);
+  const [hourlyMinute, setHourlyMinute] = useState('0');
+  const [dailyTime, setDailyTime] = useState('09:00');
+  const [customIntervalMinutes, setCustomIntervalMinutes] = useState('60');
   const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState<string>();
 
@@ -802,6 +825,25 @@ function MonitorManagement() {
     );
   }
 
+  function loadScheduleForm(value: MonitorScheduleSummary | null) {
+    setSchedule(value);
+    setScheduleType(value?.scheduleType ?? 'daily');
+    setScheduleTimeZone(value?.timeZone ?? defaultTimeZone);
+    setHourlyMinute(String(value?.hourlyMinute ?? 0));
+    setDailyTime(value?.dailyTime ?? '09:00');
+    setCustomIntervalMinutes(String(value?.customIntervalMinutes ?? 60));
+  }
+
+  function scheduleDescription(value: MonitorScheduleSummary) {
+    if (value.scheduleType === 'hourly') {
+      return `Hourly at :${String(value.hourlyMinute).padStart(2, '0')} (${value.timeZone})`;
+    }
+    if (value.scheduleType === 'daily') {
+      return `Daily at ${value.dailyTime} (${value.timeZone})`;
+    }
+    return `Every ${value.customIntervalMinutes} minutes`;
+  }
+
   async function createMonitor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting('create');
@@ -832,7 +874,7 @@ function MonitorManagement() {
       );
       setName('');
       setUrl('');
-      setMessage('Monitor configuration created. Scheduling is configured in the next step.');
+      setMessage('Monitor configuration created. Configure its schedule when you are ready.');
     } catch {
       setMessage('Monitor configuration is temporarily unavailable. Please try again.');
     } finally {
@@ -944,6 +986,127 @@ function MonitorManagement() {
     }
   }
 
+  async function openSchedule(monitor: MonitorSummary) {
+    setSubmitting(monitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(monitor.id)}/schedule`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error('Unable to load monitor schedule');
+      }
+      const payload = (await response.json()) as MonitorScheduleResponse;
+      replaceMonitor(payload.monitor);
+      setScheduleTarget(payload.monitor);
+      loadScheduleForm(payload.schedule);
+    } catch {
+      setMessage('Monitor scheduling is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!scheduleTarget) {
+      return;
+    }
+    setSubmitting(scheduleTarget.id);
+    setMessage(undefined);
+    const payload: {
+      customIntervalMinutes?: number;
+      dailyTime?: string;
+      hourlyMinute?: number;
+      scheduleType: MonitorScheduleType;
+      timeZone: string;
+    } = { scheduleType, timeZone: scheduleTimeZone };
+    if (scheduleType === 'custom') {
+      payload.customIntervalMinutes = Number(customIntervalMinutes);
+    } else if (scheduleType === 'daily') {
+      payload.dailyTime = dailyTime;
+    } else {
+      payload.hourlyMinute = Number(hourlyMinute);
+    }
+    try {
+      const response = await fetch(
+        `/api/v1/monitors/${encodeURIComponent(scheduleTarget.id)}/schedule`,
+        {
+          body: JSON.stringify(payload),
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'If-Match': `"${scheduleTarget.revision}"`,
+          },
+          method: 'PUT',
+        },
+      );
+      if (response.status === 409) {
+        await loadMonitors();
+        setScheduleTarget(undefined);
+        setSchedule(undefined);
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (response.status === 400) {
+        setMessage('Choose a valid time zone and a schedule of at least one hour.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to save monitor schedule');
+      }
+      const result = (await response.json()) as MonitorScheduleResponse;
+      replaceMonitor(result.monitor);
+      setScheduleTarget(result.monitor);
+      loadScheduleForm(result.schedule);
+      setMessage(`Schedule saved: ${scheduleDescription(result.schedule!)}.`);
+    } catch {
+      setMessage('Monitor scheduling is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function deleteSchedule() {
+    if (!scheduleTarget || !schedule) {
+      return;
+    }
+    if (!window.confirm(`Remove the schedule for “${scheduleTarget.name}”?`)) {
+      return;
+    }
+    setSubmitting(scheduleTarget.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(
+        `/api/v1/monitors/${encodeURIComponent(scheduleTarget.id)}/schedule`,
+        {
+          credentials: 'same-origin',
+          headers: { 'If-Match': `"${scheduleTarget.revision}"` },
+          method: 'DELETE',
+        },
+      );
+      if (response.status === 409) {
+        await loadMonitors();
+        setScheduleTarget(undefined);
+        setSchedule(undefined);
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to remove monitor schedule');
+      }
+      const result = (await response.json()) as MonitorScheduleResponse;
+      replaceMonitor(result.monitor);
+      setScheduleTarget(result.monitor);
+      loadScheduleForm(null);
+      setMessage('Monitor schedule removed. The monitor will not receive new scheduled checks.');
+    } catch {
+      setMessage('Monitor scheduling is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
   if (state.kind === 'loading') {
     return (
       <main className="shell account-shell" aria-live="polite">
@@ -981,8 +1144,9 @@ function MonitorManagement() {
       <h1>Monitor configuration</h1>
       <p className="account-intro">
         Create public HTTP or HTTPS monitors without embedded credentials. Your account limit is
-        enforced by the server; new accounts start with up to 50 monitors. Scheduling and extraction
-        configuration follow in the next Phase 3 items.
+        enforced by the server; new accounts start with up to 50 monitors. Set an hourly, daily, or
+        custom schedule in your IANA time zone. Extraction configuration follows in the next Phase 3
+        item.
       </p>
 
       <form className="sign-in-form" onSubmit={(event) => void createMonitor(event)}>
@@ -1059,6 +1223,116 @@ function MonitorManagement() {
         </form>
       ) : null}
 
+      {scheduleTarget ? (
+        <form className="sign-in-form totp-panel" onSubmit={(event) => void saveSchedule(event)}>
+          <h2>Schedule {scheduleTarget.name}</h2>
+          <p className="account-intro">
+            Daily and hourly schedules follow the selected IANA time zone through daylight-saving
+            transitions. Custom schedules use a fixed interval of at least one hour.
+          </p>
+          <label>
+            Schedule type
+            <select
+              onChange={(event) => setScheduleType(event.target.value as MonitorScheduleType)}
+              value={scheduleType}
+            >
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="custom">Custom interval</option>
+            </select>
+          </label>
+          <label>
+            Time zone
+            <input
+              autoComplete="off"
+              list="monitor-time-zones"
+              maxLength={64}
+              onChange={(event) => setScheduleTimeZone(event.target.value)}
+              required
+              type="text"
+              value={scheduleTimeZone}
+            />
+          </label>
+          <datalist id="monitor-time-zones">
+            <option value="UTC" />
+            <option value="America/New_York" />
+            <option value="America/Chicago" />
+            <option value="America/Denver" />
+            <option value="America/Los_Angeles" />
+            <option value="Europe/London" />
+            <option value="Europe/Berlin" />
+            <option value="Asia/Tokyo" />
+          </datalist>
+          {scheduleType === 'hourly' ? (
+            <label>
+              Minute past the hour
+              <input
+                max="59"
+                min="0"
+                onChange={(event) => setHourlyMinute(event.target.value)}
+                required
+                step="1"
+                type="number"
+                value={hourlyMinute}
+              />
+            </label>
+          ) : null}
+          {scheduleType === 'daily' ? (
+            <label>
+              Local time
+              <input
+                onChange={(event) => setDailyTime(event.target.value)}
+                required
+                type="time"
+                value={dailyTime}
+              />
+            </label>
+          ) : null}
+          {scheduleType === 'custom' ? (
+            <label>
+              Minutes between checks
+              <input
+                max="35791"
+                min="60"
+                onChange={(event) => setCustomIntervalMinutes(event.target.value)}
+                required
+                step="1"
+                type="number"
+                value={customIntervalMinutes}
+              />
+            </label>
+          ) : null}
+          {schedule ? (
+            <p className="account-intro">Current: {scheduleDescription(schedule)}.</p>
+          ) : null}
+          <div className="member-actions">
+            <button disabled={submitting !== undefined} type="submit">
+              Save schedule
+            </button>
+            {schedule ? (
+              <button
+                className="danger-button"
+                disabled={submitting !== undefined}
+                onClick={() => void deleteSchedule()}
+                type="button"
+              >
+                Remove schedule
+              </button>
+            ) : null}
+            <button
+              disabled={submitting !== undefined}
+              onClick={() => {
+                setScheduleTarget(undefined);
+                setSchedule(undefined);
+              }}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <h2 className="totp-panel">Your monitors</h2>
       {state.monitors.length === 0 ? (
         <p className="account-intro">No monitor configurations yet.</p>
@@ -1075,6 +1349,13 @@ function MonitorManagement() {
                 <p>Created {formatDate(monitor.createdAt)}</p>
               </div>
               <div className="member-actions">
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => void openSchedule(monitor)}
+                  type="button"
+                >
+                  Schedule
+                </button>
                 <button
                   disabled={submitting !== undefined}
                   onClick={() => {
@@ -1758,7 +2039,8 @@ function App() {
           Local owner onboarding now sends one-time verification links to development-only Mailpit.
           Production verification and password-reset provider delivery remain deferred.
           Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
-          available. Monitor configuration is ready; scheduling and extraction controls follow next.
+          available. Monitor configuration and scheduling are ready; extraction controls follow
+          next.
         </p>
       </section>
 
@@ -1783,10 +2065,11 @@ function App() {
 
       <section className="next" aria-labelledby="next-title">
         <p className="eyebrow">UP NEXT</p>
-        <h2 id="next-title">Monitor configuration is in progress.</h2>
+        <h2 id="next-title">Monitor scheduling is ready.</h2>
         <p>
-          Public monitor CRUD, revisions, pause/resume controls and member limits are ready.
-          Scheduling, target extraction and change rules follow before page-change detection begins.
+          Public monitor CRUD, revisions, pause/resume controls, member limits and timezone-aware
+          schedules are ready. Target extraction and change rules follow before page-change
+          detection begins.
         </p>
       </section>
     </main>

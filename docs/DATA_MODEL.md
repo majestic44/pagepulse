@@ -23,7 +23,9 @@
 
 - `credential_profiles`: owner, domain hints, encrypted envelope payload, key version and status.
 - `monitors`: owner, URL, source type, fetch mode, schedule, timezone, state, revision, next due and failure counters.
-- `monitor_schedules`: internal authoritative scheduler registry keyed by monitor and revision, with a bounded interval and correlation ID. Phase 3 will own member-facing schedule, timezone and DST configuration.
+- `monitor_schedules`: MariaDB-authoritative, one-per-monitor schedule configuration keyed by the current monitor
+  revision. It stores hourly/daily/custom type, IANA time zone, the applicable local time or custom interval, and a
+  correlation ID. Redis holds only reconciled BullMQ scheduler state.
 - `monitor_targets`: whole page, selector, repeated-list configuration or visual locator.
 - `monitor_rules`: rule type and versioned configuration.
 - `monitor_ignore_rules`: selectors, normalized patterns and built-in noise flags.

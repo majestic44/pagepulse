@@ -105,13 +105,17 @@ describe('monitor persistence', () => {
         url: 'https://example.test/new',
       }),
     ).resolves.toMatchObject({ name: 'New name', revision: 2, url: 'https://example.test/new' });
-    expect(query).toHaveBeenLastCalledWith(expect.stringContaining('revision = ?'), [
+    expect(query).toHaveBeenNthCalledWith(2, expect.stringContaining('revision = ?'), [
       'New name',
       'https://example.test/new',
       2,
       'monitor-id',
       'member-id',
       1,
+    ]);
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining('monitor_schedules'), [
+      2,
+      'monitor-id',
     ]);
   });
 
@@ -126,12 +130,16 @@ describe('monitor persistence', () => {
       revision: 2,
       state: 'paused',
     });
-    expect(paused).toHaveBeenLastCalledWith(expect.stringContaining('SET state = ?'), [
+    expect(paused).toHaveBeenNthCalledWith(2, expect.stringContaining('SET state = ?'), [
       'paused',
       2,
       'monitor-id',
       'member-id',
       1,
+    ]);
+    expect(paused).toHaveBeenLastCalledWith(expect.stringContaining('monitor_schedules'), [
+      2,
+      'monitor-id',
     ]);
 
     const deleted = vi

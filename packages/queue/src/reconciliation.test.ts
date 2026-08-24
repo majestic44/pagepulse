@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { QueueNames } from '@pagepulse/contracts';
 
 import {
-  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
   MonitorScheduleValidationError,
   monitorJobSchedulerId,
   notificationOutboxJobId,
@@ -14,9 +14,13 @@ import {
 
 const monitorSchedule = {
   correlationId: 'correlation_1',
-  everyMilliseconds: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+  customIntervalMinutes: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
+  dailyTime: null,
+  hourlyMinute: null,
   monitorId: 'monitor_1',
   monitorRevision: 1,
+  scheduleType: 'custom' as const,
+  timeZone: 'UTC',
 };
 
 describe('outbox publication', () => {
@@ -78,7 +82,7 @@ describe('scheduler reconciliation', () => {
 
     expect(upsertJobScheduler).toHaveBeenCalledWith(
       monitorJobSchedulerId(monitorSchedule),
-      { every: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS },
+      { every: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES * 60_000 },
       {
         data: {
           correlationId: 'correlation_1',
@@ -104,11 +108,55 @@ describe('scheduler reconciliation', () => {
 
     await expect(
       reconcileMonitorSchedules(queue, [
-        { ...monitorSchedule, everyMilliseconds: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS - 1 },
+        {
+          ...monitorSchedule,
+          customIntervalMinutes: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES - 1,
+        },
       ]),
     ).rejects.toBeInstanceOf(MonitorScheduleValidationError);
 
     expect(upsertJobScheduler).not.toHaveBeenCalled();
     expect(getJobSchedulers).not.toHaveBeenCalled();
+  });
+
+  it('uses timezone-aware cron patterns for hourly and daily schedules', async () => {
+    const upsertJobScheduler = vi.fn().mockResolvedValue({ id: 'job_1' });
+    const queue = {
+      getJobSchedulers: vi.fn().mockResolvedValue([]),
+      removeJobScheduler: vi.fn(),
+      upsertJobScheduler,
+    } as unknown as QueueForName<typeof QueueNames.monitorSchedule>;
+
+    await reconcileMonitorSchedules(queue, [
+      {
+        ...monitorSchedule,
+        customIntervalMinutes: null,
+        hourlyMinute: 17,
+        monitorId: 'hourly-monitor',
+        scheduleType: 'hourly',
+        timeZone: 'America/New_York',
+      },
+      {
+        ...monitorSchedule,
+        customIntervalMinutes: null,
+        dailyTime: '09:30',
+        monitorId: 'daily-monitor',
+        scheduleType: 'daily',
+        timeZone: 'America/New_York',
+      },
+    ]);
+
+    expect(upsertJobScheduler).toHaveBeenNthCalledWith(
+      1,
+      monitorJobSchedulerId({ ...monitorSchedule, monitorId: 'hourly-monitor' }),
+      { pattern: '17 * * * *', tz: 'America/New_York' },
+      expect.any(Object),
+    );
+    expect(upsertJobScheduler).toHaveBeenNthCalledWith(
+      2,
+      monitorJobSchedulerId({ ...monitorSchedule, monitorId: 'daily-monitor' }),
+      { pattern: '30 09 * * *', tz: 'America/New_York' },
+      expect.any(Object),
+    );
   });
 });

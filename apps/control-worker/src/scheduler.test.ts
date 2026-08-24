@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type MonitorSchedule, type PendingOutboxEvent } from '@pagepulse/db';
 import {
-  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+  MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
   QueueNames,
   type QueueForName,
 } from '@pagepulse/queue';
@@ -12,9 +12,13 @@ import { createSchedulerReconciler, runInitialWorkerReconciliation } from './sch
 const schedules: MonitorSchedule[] = [
   {
     correlationId: 'correlation_1',
-    everyMilliseconds: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS,
+    customIntervalMinutes: MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES,
+    dailyTime: null,
+    hourlyMinute: null,
     monitorId: 'monitor_1',
     monitorRevision: 1,
+    scheduleType: 'custom',
+    timeZone: 'UTC',
   },
 ];
 
