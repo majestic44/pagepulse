@@ -31,6 +31,7 @@ import {
   AuthenticationUnavailableResponse,
   AuthenticationCredentials,
   DiagnosticsResponse,
+  EmailVerificationRequest,
   ForbiddenResponse,
   HealthResponse,
   InvalidAuthenticationRequestResponse,
@@ -59,6 +60,7 @@ import {
   type AuthenticationDependencies,
   type AuthenticationRateLimitPolicies,
 } from './auth.js';
+import { createVerificationEmailDelivery } from './email-delivery.js';
 import { createHealthService, type HealthService } from './health.js';
 import { createMemberService } from './members.js';
 import {
@@ -139,6 +141,7 @@ async function createDefaultAuthenticationDependencies(
       },
       rateLimitPolicies: authenticationRateLimitPolicies(environment),
       rateLimitStore: new RedisFixedWindowRateLimitStore(redis),
+      emailDelivery: createVerificationEmailDelivery(environment),
       service,
       members: createMemberService({ pool }),
       sessions: createSessionService({
@@ -359,7 +362,18 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        await authentication.service.redeemOwnerSetup(request.body.token, request.body.password);
+        if (!authentication.emailDelivery.enabled) {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
+        const verification = await authentication.service.redeemOwnerSetup(
+          request.body.token,
+          request.body.password,
+        );
+        try {
+          await authentication.emailDelivery.sendVerification(verification);
+        } catch {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
         return reply.code(202).send({ status: 'verification_required' });
       } catch (error) {
         if (isInvalidAuthenticationRequest(error)) {
@@ -389,7 +403,18 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        await authentication.service.redeemInvitation(request.body.token, request.body.password);
+        if (!authentication.emailDelivery.enabled) {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
+        const verification = await authentication.service.redeemInvitation(
+          request.body.token,
+          request.body.password,
+        );
+        try {
+          await authentication.emailDelivery.sendVerification(verification);
+        } catch {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
         return reply.code(202).send({ status: 'verification_required' });
       } catch (error) {
         if (isInvalidAuthenticationRequest(error)) {
@@ -427,6 +452,48 @@ export async function buildApp(options: BuildAppOptions = {}) {
         }
         throw error;
       }
+    },
+  );
+
+  app.post<{ Body: { email: string } }>(
+    '/api/v1/auth/email-verifications/resend',
+    {
+      schema: {
+        body: EmailVerificationRequest,
+        response: {
+          202: AuthenticationAcceptedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('redemption', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      if (!authentication.emailDelivery.enabled) {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+      let verification: Awaited<
+        ReturnType<AuthenticationDependencies['service']['requestEmailVerification']>
+      >;
+      try {
+        verification = await authentication.service.requestEmailVerification(request.body.email);
+      } catch (error) {
+        if (error instanceof EmailValidationError) {
+          return reply.code(202).send({ status: 'verification_required' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+      if (verification) {
+        try {
+          await authentication.emailDelivery.sendVerification(verification);
+        } catch {
+          return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        }
+      }
+      return reply.code(202).send({ status: 'verification_required' });
     },
   );
 

@@ -3,6 +3,7 @@ import {
   createOpaqueToken,
   hashOpaqueToken,
   hashPassword,
+  normalizeEmail,
   type RateLimitStore,
   verifyPassword,
 } from '@pagepulse/auth';
@@ -12,6 +13,7 @@ import {
   AccountTokenTypes,
   findAuthenticationUser,
   findAuthenticationUserById,
+  issueEmailVerification,
   issuePasswordReset,
   redeemInvitation,
   redeemOwnerSetup,
@@ -25,11 +27,17 @@ import type { SessionService } from './session.js';
 import type { AccountDeletionService } from './account-deletion.js';
 import type { MemberService } from './members.js';
 import type { TotpService } from './totp.js';
+import type { VerificationEmailDelivery } from './email-delivery.js';
 
 export type AuthenticationTokenIssue = Readonly<{
   expiresAt: Date;
   token: string;
 }>;
+
+export type AuthenticationEmailVerificationIssue = AuthenticationTokenIssue &
+  Readonly<{
+    email: string;
+  }>;
 
 export type AuthenticationLogin = Readonly<{
   totpEnabled: boolean;
@@ -40,8 +48,17 @@ export type AuthenticationService = Readonly<{
   completePasswordReset: (token: string, password: string) => Promise<void>;
   confirmEmailVerification: (token: string) => Promise<void>;
   login: (email: string, password: string) => Promise<AuthenticationLogin | undefined>;
-  redeemInvitation: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
-  redeemOwnerSetup: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
+  redeemInvitation: (
+    token: string,
+    password: string,
+  ) => Promise<AuthenticationEmailVerificationIssue>;
+  redeemOwnerSetup: (
+    token: string,
+    password: string,
+  ) => Promise<AuthenticationEmailVerificationIssue>;
+  requestEmailVerification: (
+    email: string,
+  ) => Promise<AuthenticationEmailVerificationIssue | undefined>;
   requestPasswordReset: (email: string) => Promise<AuthenticationTokenIssue | undefined>;
   verifyCurrentPassword: (userId: string, password: string) => Promise<boolean>;
 }>;
@@ -125,27 +142,46 @@ export async function createAuthenticationService({
     async redeemInvitation(token, password) {
       const passwordHash = await hashPassword(password, passwordHashing);
       const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
-      await withAuthenticationTransaction(pool, (connection) =>
+      const redeemed = await withAuthenticationTransaction(pool, (connection) =>
         redeemInvitation(connection, {
           invitationTokenHash: hashOpaqueToken(token),
           passwordHash,
           verificationToken: verification,
         }),
       );
-      return { expiresAt: verification.expiresAt, token: verification.token };
+      return {
+        email: redeemed.email,
+        expiresAt: verification.expiresAt,
+        token: verification.token,
+      };
     },
 
     async redeemOwnerSetup(token, password) {
       const passwordHash = await hashPassword(password, passwordHashing);
       const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
-      await withAuthenticationTransaction(pool, (connection) =>
+      const redeemed = await withAuthenticationTransaction(pool, (connection) =>
         redeemOwnerSetup(connection, {
           passwordHash,
           setupTokenHash: hashOpaqueToken(token),
           verificationToken: verification,
         }),
       );
-      return { expiresAt: verification.expiresAt, token: verification.token };
+      return {
+        email: redeemed.email,
+        expiresAt: verification.expiresAt,
+        token: verification.token,
+      };
+    },
+
+    async requestEmailVerification(email) {
+      const normalizedEmail = normalizeEmail(email);
+      const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
+      const issued = await withAuthenticationTransaction(pool, (connection) =>
+        issueEmailVerification(connection, normalizedEmail, { token: verification }),
+      );
+      return issued
+        ? { email: normalizedEmail, expiresAt: verification.expiresAt, token: verification.token }
+        : undefined;
     },
 
     async requestPasswordReset(email) {
@@ -178,6 +214,7 @@ export type AuthenticationRateLimitPolicies = Readonly<{
 
 export type AuthenticationDependencies = Readonly<{
   accountDeletion: AccountDeletionService;
+  emailDelivery: VerificationEmailDelivery;
   members: MemberService;
   rateLimitPolicies: AuthenticationRateLimitPolicies;
   rateLimitStore: RateLimitStore;

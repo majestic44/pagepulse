@@ -32,9 +32,12 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
   by supplying the same email. The token is valid for 30 minutes by default (5 minutes to 24 hours configured
   through `OWNER_SETUP_TOKEN_TTL_MINUTES`) and Phase 2 invitation redemption will consume it once.
 
-Email and reset delivery are deferred until the notification platform work. Until then the API never returns,
-logs, queues or stores a recoverable verification/reset token, and deployments must not present the resulting
-verification or reset flow as deliverable to end users.
+Email verification uses an explicitly development-only Mailpit adapter. It sends the plaintext link directly in the
+same request lifecycle to the account email address, while MariaDB stores only the SHA-256 digest. The adapter has a
+fixed internal destination (`mailpit:1025`), never reads an arbitrary SMTP host from configuration and is rejected
+outside `NODE_ENV=development`. The browser removes setup and verification token queries from its address bar before
+rendering. Tokens are never returned by the API, logged, queued or placed in an outbox payload. Production verification
+and all password-reset delivery remain deferred until the reviewed notification provider work.
 
 ## Credential encryption
 

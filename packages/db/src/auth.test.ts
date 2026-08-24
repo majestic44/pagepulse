@@ -4,6 +4,7 @@ import {
   AuthenticationStateError,
   AuthenticationTokenError,
   findAuthenticationUser,
+  issueEmailVerification,
   redeemInvitation,
   resetPassword,
   withAuthenticationTransaction,
@@ -145,6 +146,46 @@ describe('authentication persistence', () => {
       ),
     ).rejects.toBeInstanceOf(AuthenticationStateError);
     expect(query).toHaveBeenCalledOnce();
+  });
+
+  it('issues a replacement verification token only for a password-configured invited account', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [
+          {
+            emailVerifiedAt: null,
+            id: 'owner-id',
+            passwordHash: 'argon2id$password-digest',
+            status: 'invited',
+          },
+        ],
+        [],
+      ])
+      .mockResolvedValue([[], []]);
+    const { connection } = createConnection(query);
+
+    await expect(
+      issueEmailVerification(
+        connection,
+        ' Owner@Example.Test ',
+        {
+          token: {
+            expiresAt: future,
+            tokenHash: 'replacement-verification-digest',
+            type: 'email_verification',
+          },
+        },
+        now,
+      ),
+    ).resolves.toBe(true);
+
+    expect(query).toHaveBeenCalledWith(
+      `SELECT id, status, password_hash AS passwordHash, email_verified_at AS emailVerifiedAt
+     FROM users WHERE email = ? LIMIT 1 FOR UPDATE`,
+      ['owner@example.test'],
+    );
+    expect(JSON.stringify(query.mock.calls)).not.toContain('replacement verification plaintext');
   });
 
   it('revokes all sessions after resetting a verified account password', async () => {

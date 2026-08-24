@@ -26,6 +26,7 @@ const environmentSchema = z
     APP_VERSION: z.string().trim().min(1).max(128).default('0.0.0-dev'),
     APP_BASE_URL: z.url().optional(),
     OWNER_SETUP_TOKEN_TTL_MINUTES: z.coerce.number().int().min(5).max(1_440).default(30),
+    AUTH_EMAIL_DELIVERY_MODE: z.enum(['disabled', 'mailpit']).default('disabled'),
     AUTH_ARGON2_MEMORY_KIB: z.coerce.number().int().min(8).max(1_048_576).default(65_536),
     AUTH_ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(16).default(1),
     AUTH_ARGON2_PASSES: z.coerce.number().int().min(1).max(10).default(3),
@@ -129,6 +130,23 @@ const environmentSchema = z
         code: 'custom',
         message: 'APP_BASE_URL must use HTTPS in production',
         path: ['APP_BASE_URL'],
+      });
+    }
+    if (environment.AUTH_EMAIL_DELIVERY_MODE === 'mailpit' && !environment.APP_BASE_URL) {
+      context.addIssue({
+        code: 'custom',
+        message: 'APP_BASE_URL is required when AUTH_EMAIL_DELIVERY_MODE is mailpit',
+        path: ['APP_BASE_URL'],
+      });
+    }
+    if (
+      environment.NODE_ENV !== 'development' &&
+      environment.AUTH_EMAIL_DELIVERY_MODE === 'mailpit'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'AUTH_EMAIL_DELIVERY_MODE=mailpit is only allowed in development',
+        path: ['AUTH_EMAIL_DELIVERY_MODE'],
       });
     }
   });

@@ -32,6 +32,7 @@ describe('loadEnvironment', () => {
       SCHEDULER_RECONCILIATION_INTERVAL_MS: 300_000,
       ACCOUNT_DELETION_SWEEP_INTERVAL_MS: 3_600_000,
       OWNER_SETUP_TOKEN_TTL_MINUTES: 30,
+      AUTH_EMAIL_DELIVERY_MODE: 'disabled',
       AUTH_ARGON2_MEMORY_KIB: 65_536,
       AUTH_LOGIN_RATE_LIMIT_MAX: 5,
       AUTH_DELETION_RATE_LIMIT_MAX: 3,
@@ -136,6 +137,20 @@ describe('loadEnvironment', () => {
     expect(validationError?.message).toContain('BROWSER_CONCURRENCY_MIN:');
     expect(validationError?.issues).toContainEqual(
       expect.objectContaining({ path: ['BROWSER_CONCURRENCY_MIN'] }),
+    );
+  });
+
+  it('allows Mailpit delivery only for local development with an application URL', () => {
+    expect(() =>
+      loadEnvironment({
+        APP_BASE_URL: 'http://localhost:8080',
+        AUTH_EMAIL_DELIVERY_MODE: 'mailpit',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow(EnvironmentValidationError);
+
+    expect(() => loadEnvironment({ AUTH_EMAIL_DELIVERY_MODE: 'mailpit' })).toThrow(
+      EnvironmentValidationError,
     );
   });
 });

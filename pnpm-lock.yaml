@@ -61,7 +61,13 @@ importers:
       fastify:
         specifier: ^5.6.2
         version: 5.12.0
+      nodemailer:
+        specifier: ^9.0.5
+        version: 9.0.5
     devDependencies:
+      '@types/nodemailer':
+        specifier: ^8.0.1
+        version: 8.0.1
       tsx:
         specifier: ^4.20.6
         version: 4.23.12
@@ -1613,6 +1619,12 @@ packages:
         integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==,
       }
 
+  '@types/nodemailer@8.0.1':
+    resolution:
+      {
+        integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==,
+      }
+
   '@types/react-dom@19.2.4':
     resolution:
       {
@@ -2742,6 +2754,13 @@ packages:
         integrity: sha512-D9UOmYG3UH1V+ENW56t5QXBwJw1YEY18ruVeus89Rw+SyIgjPkCO84bRzO3uNIYosJbNwiabWVn48o3uJLjxFQ==,
       }
     engines: { node: '>=18' }
+
+  nodemailer@9.0.5:
+    resolution:
+      {
+        integrity: sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ==,
+      }
+    engines: { node: '>=6.0.0' }
 
   obug@2.1.4:
     resolution:
@@ -4023,6 +4042,10 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/nodemailer@8.0.1':
+    dependencies:
+      '@types/node': 24.13.3
+
   '@types/react-dom@19.2.4(@types/react@19.2.18)':
     dependencies:
       '@types/react': 19.2.18
@@ -4738,6 +4761,8 @@ snapshots:
     optional: true
 
   node-releases@2.0.53: {}
+
+  nodemailer@9.0.5: {}
 
   obug@2.1.4: {}
 

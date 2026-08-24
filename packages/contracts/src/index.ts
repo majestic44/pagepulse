@@ -209,6 +209,11 @@ export const PasswordResetRequest = Type.Object(
   queuePayloadOptions,
 );
 
+export const EmailVerificationRequest = Type.Object(
+  { email: Type.String({ minLength: 1, maxLength: 320 }) },
+  queuePayloadOptions,
+);
+
 export const AuthenticationAcceptedResponse = Type.Object({
   status: Type.Union([
     Type.Literal('reset_requested'),
