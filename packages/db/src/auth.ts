@@ -255,7 +255,7 @@ export async function issueEmailVerification(
   );
   const row = rows[0];
   if (!row) {
-    return false;
+    return undefined;
   }
   const record = asRecord(row);
   if (
@@ -263,10 +263,11 @@ export async function issueEmailVerification(
     readNullableDate(record, 'emailVerifiedAt') !== null ||
     readNullableString(record, 'passwordHash') === null
   ) {
-    return false;
+    return undefined;
   }
-  await issueAccountToken(connection, readString(record, 'id'), input.token, now);
-  return true;
+  const userId = readString(record, 'id');
+  await issueAccountToken(connection, userId, input.token, now);
+  return userId;
 }
 
 export async function verifyEmailAddress(
@@ -301,6 +302,7 @@ export async function verifyEmailAddress(
     now,
     readString(record, 'userId'),
   ]);
+  return readString(record, 'userId');
 }
 
 export async function findAuthenticationUser(connection: AuthConnection, email: string) {
@@ -417,4 +419,5 @@ export async function resetPassword(
     [input.passwordHash, now, readString(record, 'userId')],
   );
   await revokeSessionsForUser(connection, readString(record, 'userId'), now);
+  return readString(record, 'userId');
 }

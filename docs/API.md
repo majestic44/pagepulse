@@ -13,7 +13,7 @@ Base path: `/api/v1`. The generated OpenAPI document is served to authenticated 
 - `/alerts`: preferences, endpoints, tests, delivery history and manual retry.
 - `/push-subscriptions`: VAPID subscription management.
 - `/tokens`: PAT create/list/revoke; plaintext returned only at creation.
-- `/owner`: users, limits, global pause, providers, retention and diagnostics.
+- `/owner`: users, audit history, limits, global pause, providers, retention and diagnostics.
 - `/system`: public version/uptime; authenticated capability and readiness detail.
 
 ## Conventions
@@ -114,7 +114,12 @@ stored factors require `TOTP_ENCRYPTION_KEK`; absence of that secret fails TOTP 
 
 Member management is enforced at the API boundary, not only in the owner UI. Owners cannot use member lifecycle
 routes against owner accounts, and member sessions are invalidated by both suspension and removal. Security/admin
-audit events for those actions are the next Phase 2 item.
+audit events retain only action names, opaque actor/target IDs, a one-way requester-IP hash, request ID and timestamps.
+They contain no email addresses, tokens, credentials, request bodies, private fetched content or raw IP addresses.
+
+`GET /api/v1/owner/audit-events` is owner-only and returns the newest 100 events for the last 90 days. The response
+omits requester-IP hashes, request IDs and retention deadlines; it exposes only safe actor/target IDs, action names
+and timestamps. MariaDB retention cleanup removes expired events in bounded batches with the maintenance worker.
 
 Outbound email delivery is deliberately deferred to Phase 5. Verification and password-reset flows store only token
 hashes and do not return a recoverable plaintext token. Account deletion is the narrowly scoped exception: its recovery

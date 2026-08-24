@@ -301,6 +301,29 @@ export const ManagedMembersResponse = Type.Object({
   members: Type.Array(ManagedMemberSummary),
 });
 
+const AuditOptionalIdentifier = Type.Union([
+  Type.String({ minLength: 1, maxLength: 128 }),
+  Type.Null(),
+]);
+
+export const AuditEventSummary = Type.Object({
+  action: Type.String({ minLength: 1, maxLength: 96 }),
+  actorUserId: AuditOptionalIdentifier,
+  createdAt: Type.String({ format: 'date-time' }),
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  targetId: AuditOptionalIdentifier,
+  targetType: Type.Union([
+    Type.Literal('account'),
+    Type.Literal('member'),
+    Type.Literal('session'),
+    Type.Literal('system'),
+  ]),
+});
+
+export const AuditEventsResponse = Type.Object({
+  events: Type.Array(AuditEventSummary, { maxItems: 100 }),
+});
+
 export const MemberIdParameters = Type.Object({
   memberId: Type.String({ minLength: 1, maxLength: 36 }),
 });

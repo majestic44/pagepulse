@@ -10,6 +10,7 @@ import {
   verifyTotpCode,
 } from '@pagepulse/auth';
 import {
+  AuditActions,
   AuthenticationStateError,
   AuthenticationTokenError,
   beginTotpEnrollment,
@@ -25,6 +26,8 @@ import {
   recordTotpTimeStep,
   replaceTotpRecoveryCodes,
   revokeSessionsForUser,
+  recordAuditEvent,
+  type AuditContext,
   type TotpLoginChallenge,
   type TotpPool,
   withTotpTransaction,
@@ -51,20 +54,30 @@ export type TotpLoginChallengeIssue = Readonly<{
 }>;
 
 export type TotpService = Readonly<{
-  beginEnrollment: (input: Readonly<{ email: string; userId: string }>) => Promise<TotpEnrollment>;
+  beginEnrollment: (
+    input: Readonly<{ email: string; userId: string }>,
+    audit?: AuditContext,
+  ) => Promise<TotpEnrollment>;
   completeLogin: (challengeToken: string, proof: TotpProof) => Promise<TotpLoginChallenge>;
   confirmEnrollment: (
     userId: string,
     currentSessionId: string,
     code: string,
+    audit?: AuditContext,
   ) => Promise<ReadonlyArray<string>>;
   createLoginChallenge: (userId: string) => Promise<TotpLoginChallengeIssue>;
-  disable: (userId: string, currentSessionId: string, proof: TotpProof) => Promise<void>;
+  disable: (
+    userId: string,
+    currentSessionId: string,
+    proof: TotpProof,
+    audit?: AuditContext,
+  ) => Promise<void>;
   isEnabled: (userId: string) => Promise<boolean>;
   replaceRecoveryCodes: (
     userId: string,
     currentSessionId: string,
     proof: TotpProof,
+    audit?: AuditContext,
   ) => Promise<ReadonlyArray<string>>;
   verify: (userId: string, proof: TotpProof) => Promise<void>;
 }>;
@@ -172,7 +185,7 @@ export function createTotpService({
   }
 
   return {
-    async beginEnrollment(input) {
+    async beginEnrollment(input, audit) {
       const current = now();
       const key = requireEncryptionKey(encryptionKey);
       const secret = createTotpSecret();
@@ -189,6 +202,14 @@ export function createTotpService({
           },
           current,
         );
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.totpEnrollmentStarted,
+          actorUserId: input.userId,
+          createdAt: current,
+          targetId: input.userId,
+          targetType: 'account',
+        });
       });
       return {
         manualEntryKey: secret,
@@ -210,7 +231,7 @@ export function createTotpService({
       });
     },
 
-    async confirmEnrollment(userId, currentSessionId, code) {
+    async confirmEnrollment(userId, currentSessionId, code, audit) {
       const current = now();
       const key = requireEncryptionKey(encryptionKey);
       const recoveryCodes = createRecoveryCodes();
@@ -240,6 +261,14 @@ export function createTotpService({
           currentSessionId,
           current,
         );
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.totpEnabled,
+          actorUserId: userId,
+          createdAt: current,
+          targetId: userId,
+          targetType: 'account',
+        });
       });
       return recoveryCodes;
     },
@@ -258,11 +287,19 @@ export function createTotpService({
       return { expiresAt, token };
     },
 
-    async disable(userId, currentSessionId, proof) {
+    async disable(userId, currentSessionId, proof, audit) {
       const current = now();
       await withTotpTransaction(pool, async (connection) => {
         await verifyCurrentFactor(connection, userId, proof, current);
         await disableTotpMethod(connection, userId, currentSessionId, current);
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.totpDisabled,
+          actorUserId: userId,
+          createdAt: current,
+          targetId: userId,
+          targetType: 'account',
+        });
       });
     },
 
@@ -270,7 +307,7 @@ export function createTotpService({
       return withTotpTransaction(pool, (connection) => hasTotpMethod(connection, userId));
     },
 
-    async replaceRecoveryCodes(userId, currentSessionId, proof) {
+    async replaceRecoveryCodes(userId, currentSessionId, proof, audit) {
       const current = now();
       const key = requireEncryptionKey(encryptionKey);
       const recoveryCodes = createRecoveryCodes();
@@ -283,6 +320,14 @@ export function createTotpService({
           userId,
         });
         await revokeSessionsForUser(connection, userId, current, currentSessionId);
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.totpRecoveryCodesReplaced,
+          actorUserId: userId,
+          createdAt: current,
+          targetId: userId,
+          targetType: 'account',
+        });
       });
       return recoveryCodes;
     },

@@ -1,11 +1,14 @@
 import { createOpaqueToken, hashOpaqueToken } from '@pagepulse/auth';
 import {
+  AuditActions,
   createSession,
   findActiveSession,
   listActiveSessions,
   revokeSession,
   revokeSessionByTokenHash,
   revokeSessionsForUser,
+  recordAuditEvent,
+  type AuditContext,
   type ActiveSession,
   type SessionPool,
   touchSession,
@@ -29,11 +32,12 @@ export type SessionService = Readonly<{
   issue: (
     input: Readonly<{ deviceLabel: string; userId: string }>,
     previousToken?: string,
+    audit?: AuditContext,
   ) => Promise<SessionIssue>;
   list: (userId: string) => Promise<ReadonlyArray<ActiveSession>>;
-  revoke: (userId: string, sessionId: string) => Promise<boolean>;
-  revokeByToken: (token: string) => Promise<void>;
-  revokeOthers: (userId: string, currentSessionId: string) => Promise<void>;
+  revoke: (userId: string, sessionId: string, audit?: AuditContext) => Promise<boolean>;
+  revokeByToken: (token: string, audit?: AuditContext) => Promise<void>;
+  revokeOthers: (userId: string, currentSessionId: string, audit?: AuditContext) => Promise<void>;
 }>;
 
 export type SessionServiceOptions = Readonly<{
@@ -140,12 +144,12 @@ export function createSessionService({
       });
     },
 
-    async issue(input, previousToken) {
+    async issue(input, previousToken, audit) {
       const current = now();
       const token = createOpaqueToken();
       const absoluteExpiresAt = expiresAfterMinutes(timing.absoluteTtlMinutes, current);
-      await withSessionTransaction(pool, (connection) =>
-        createSession(
+      await withSessionTransaction(pool, async (connection) => {
+        const sessionId = await createSession(
           connection,
           {
             absoluteExpiresAt,
@@ -156,8 +160,18 @@ export function createSessionService({
           },
           current,
           previousToken ? hashOpaqueToken(previousToken) : undefined,
-        ),
-      );
+        );
+        if (audit) {
+          await recordAuditEvent(connection, {
+            ...audit,
+            action: AuditActions.loginSucceeded,
+            actorUserId: input.userId,
+            createdAt: current,
+            targetId: sessionId,
+            targetType: 'session',
+          });
+        }
+      });
       return { expiresAt: absoluteExpiresAt, token };
     },
 
@@ -167,22 +181,56 @@ export function createSessionService({
       );
     },
 
-    async revoke(userId, sessionId) {
-      return withSessionTransaction(pool, (connection) =>
-        revokeSession(connection, userId, sessionId, now()),
-      );
+    async revoke(userId, sessionId, audit) {
+      const current = now();
+      return withSessionTransaction(pool, async (connection) => {
+        const revoked = await revokeSession(connection, userId, sessionId, current);
+        if (revoked && audit) {
+          await recordAuditEvent(connection, {
+            ...audit,
+            action: AuditActions.sessionRevoked,
+            actorUserId: userId,
+            createdAt: current,
+            targetId: sessionId,
+            targetType: 'session',
+          });
+        }
+        return revoked;
+      });
     },
 
-    async revokeByToken(token) {
-      await withSessionTransaction(pool, (connection) =>
-        revokeSessionByTokenHash(connection, hashOpaqueToken(token), now()),
-      );
+    async revokeByToken(token, audit) {
+      const current = now();
+      await withSessionTransaction(pool, async (connection) => {
+        const session = await revokeSessionByTokenHash(connection, hashOpaqueToken(token), current);
+        if (session && audit) {
+          await recordAuditEvent(connection, {
+            ...audit,
+            action: AuditActions.logout,
+            actorUserId: session.userId,
+            createdAt: current,
+            targetId: session.id,
+            targetType: 'session',
+          });
+        }
+      });
     },
 
-    async revokeOthers(userId, currentSessionId) {
-      await withSessionTransaction(pool, (connection) =>
-        revokeSessionsForUser(connection, userId, now(), currentSessionId),
-      );
+    async revokeOthers(userId, currentSessionId, audit) {
+      const current = now();
+      await withSessionTransaction(pool, async (connection) => {
+        await revokeSessionsForUser(connection, userId, current, currentSessionId);
+        if (audit) {
+          await recordAuditEvent(connection, {
+            ...audit,
+            action: AuditActions.sessionsRevoked,
+            actorUserId: userId,
+            createdAt: current,
+            targetId: userId,
+            targetType: 'account',
+          });
+        }
+      });
     },
   };
 }

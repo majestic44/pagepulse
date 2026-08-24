@@ -8,7 +8,9 @@ import {
   verifyPassword,
 } from '@pagepulse/auth';
 import {
+  AuditActions,
   type AuthPool,
+  type AuditContext,
   type AuthenticationUser,
   AccountTokenTypes,
   findAuthenticationUser,
@@ -18,6 +20,7 @@ import {
   redeemInvitation,
   redeemOwnerSetup,
   resetPassword,
+  recordAuditEvent,
   hasTotpMethod,
   verifyEmailAddress,
   withAuthenticationTransaction,
@@ -25,6 +28,7 @@ import {
 
 import type { SessionService } from './session.js';
 import type { AccountDeletionService } from './account-deletion.js';
+import type { AuditService } from './audit.js';
 import type { MemberService } from './members.js';
 import type { TotpService } from './totp.js';
 import type { VerificationEmailDelivery } from './email-delivery.js';
@@ -45,19 +49,22 @@ export type AuthenticationLogin = Readonly<{
 }>;
 
 export type AuthenticationService = Readonly<{
-  completePasswordReset: (token: string, password: string) => Promise<void>;
-  confirmEmailVerification: (token: string) => Promise<void>;
+  completePasswordReset: (token: string, password: string, audit?: AuditContext) => Promise<void>;
+  confirmEmailVerification: (token: string, audit?: AuditContext) => Promise<void>;
   login: (email: string, password: string) => Promise<AuthenticationLogin | undefined>;
   redeemInvitation: (
     token: string,
     password: string,
+    audit?: AuditContext,
   ) => Promise<AuthenticationEmailVerificationIssue>;
   redeemOwnerSetup: (
     token: string,
     password: string,
+    audit?: AuditContext,
   ) => Promise<AuthenticationEmailVerificationIssue>;
   requestEmailVerification: (
     email: string,
+    audit?: AuditContext,
   ) => Promise<AuthenticationEmailVerificationIssue | undefined>;
   requestPasswordReset: (email: string) => Promise<AuthenticationTokenIssue | undefined>;
   verifyCurrentPassword: (userId: string, password: string) => Promise<boolean>;
@@ -109,17 +116,34 @@ export async function createAuthenticationService({
   const dummyPasswordHash = await hashPassword('pagepulse-login-dummy-password', passwordHashing);
 
   return {
-    async completePasswordReset(token, password) {
+    async completePasswordReset(token, password, audit) {
       const passwordHash = await hashPassword(password, passwordHashing);
-      await withAuthenticationTransaction(pool, (connection) =>
-        resetPassword(connection, { passwordHash, resetTokenHash: hashOpaqueToken(token) }),
-      );
+      await withAuthenticationTransaction(pool, async (connection) => {
+        const userId = await resetPassword(connection, {
+          passwordHash,
+          resetTokenHash: hashOpaqueToken(token),
+        });
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.passwordResetCompleted,
+          actorUserId: userId,
+          targetId: userId,
+          targetType: 'account',
+        });
+      });
     },
 
-    async confirmEmailVerification(token) {
-      await withAuthenticationTransaction(pool, (connection) =>
-        verifyEmailAddress(connection, hashOpaqueToken(token)),
-      );
+    async confirmEmailVerification(token, audit) {
+      await withAuthenticationTransaction(pool, async (connection) => {
+        const userId = await verifyEmailAddress(connection, hashOpaqueToken(token));
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.emailVerified,
+          actorUserId: userId,
+          targetId: userId,
+          targetType: 'account',
+        });
+      });
     },
 
     async login(email, password) {
@@ -139,16 +163,24 @@ export async function createAuthenticationService({
       return { totpEnabled, user };
     },
 
-    async redeemInvitation(token, password) {
+    async redeemInvitation(token, password, audit) {
       const passwordHash = await hashPassword(password, passwordHashing);
       const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
-      const redeemed = await withAuthenticationTransaction(pool, (connection) =>
-        redeemInvitation(connection, {
+      const redeemed = await withAuthenticationTransaction(pool, async (connection) => {
+        const result = await redeemInvitation(connection, {
           invitationTokenHash: hashOpaqueToken(token),
           passwordHash,
           verificationToken: verification,
-        }),
-      );
+        });
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.invitationRedeemed,
+          actorUserId: result.userId,
+          targetId: result.userId,
+          targetType: 'account',
+        });
+        return result;
+      });
       return {
         email: redeemed.email,
         expiresAt: verification.expiresAt,
@@ -156,16 +188,24 @@ export async function createAuthenticationService({
       };
     },
 
-    async redeemOwnerSetup(token, password) {
+    async redeemOwnerSetup(token, password, audit) {
       const passwordHash = await hashPassword(password, passwordHashing);
       const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
-      const redeemed = await withAuthenticationTransaction(pool, (connection) =>
-        redeemOwnerSetup(connection, {
+      const redeemed = await withAuthenticationTransaction(pool, async (connection) => {
+        const result = await redeemOwnerSetup(connection, {
           passwordHash,
           setupTokenHash: hashOpaqueToken(token),
           verificationToken: verification,
-        }),
-      );
+        });
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.ownerSetupCompleted,
+          actorUserId: result.userId,
+          targetId: result.userId,
+          targetType: 'account',
+        });
+        return result;
+      });
       return {
         email: redeemed.email,
         expiresAt: verification.expiresAt,
@@ -173,13 +213,25 @@ export async function createAuthenticationService({
       };
     },
 
-    async requestEmailVerification(email) {
+    async requestEmailVerification(email, audit) {
       const normalizedEmail = normalizeEmail(email);
       const verification = createVerificationToken(emailVerificationTokenTtlMinutes);
-      const issued = await withAuthenticationTransaction(pool, (connection) =>
-        issueEmailVerification(connection, normalizedEmail, { token: verification }),
-      );
-      return issued
+      const userId = await withAuthenticationTransaction(pool, async (connection) => {
+        const issued = await issueEmailVerification(connection, normalizedEmail, {
+          token: verification,
+        });
+        if (issued) {
+          await recordAuditEvent(connection, {
+            ...audit,
+            action: AuditActions.emailVerificationResent,
+            actorUserId: issued,
+            targetId: issued,
+            targetType: 'account',
+          });
+        }
+        return issued;
+      });
+      return userId
         ? { email: normalizedEmail, expiresAt: verification.expiresAt, token: verification.token }
         : undefined;
     },
@@ -214,6 +266,7 @@ export type AuthenticationRateLimitPolicies = Readonly<{
 
 export type AuthenticationDependencies = Readonly<{
   accountDeletion: AccountDeletionService;
+  audit: AuditService;
   emailDelivery: VerificationEmailDelivery;
   members: MemberService;
   rateLimitPolicies: AuthenticationRateLimitPolicies;

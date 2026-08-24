@@ -85,7 +85,11 @@ on foreign keys to remove member-owned account records. Self-service deletion is
 current password and a fresh TOTP proof when enabled, revokes every session, and stores only a SHA-256 digest of its
 one-time recovery token. Recovery is unauthenticated but rate-limited, returns no account details, and works only
 before the MariaDB deletion deadline. The maintenance worker deletes expired member records in bounded transactions.
-The remaining Phase 2 item adds the retained audit trail for these lifecycle actions.
+Security and administrative actions write a MariaDB audit record in the same transaction as the state change. Records
+contain an action name, opaque actor/target IDs, a one-way requester-IP hash, request ID and a 90-day retention deadline;
+they never contain email addresses, tokens, credentials, request bodies, private fetched content or raw IP addresses.
+The maintenance worker removes expired records in bounded batches. Only owners can read recent audit history, and that
+response deliberately omits requester-IP hashes, request IDs and retention deadlines.
 
 ## Security gates
 

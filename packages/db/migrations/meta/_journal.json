@@ -50,6 +50,13 @@
       "when": 1787563692216,
       "tag": "0006_account-deletion-recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787571469796,
+      "tag": "0007_tricky_tusk",
+      "breakpoints": true
     }
   ]
 }

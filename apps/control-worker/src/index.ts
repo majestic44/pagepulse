@@ -5,6 +5,7 @@ import {
   listActiveMonitorSchedules,
   listPendingOutboxEvents,
   markOutboxEventPublished,
+  purgeExpiredAuditEvents,
   purgeExpiredAccountDeletions as purgeExpiredAccountDeletionRecords,
   withAccountDeletionTransaction,
 } from '@pagepulse/db';
@@ -100,10 +101,11 @@ async function startControlWorker() {
   if (role === 'maintenance') {
     const pool = createDatabasePool(environment.DATABASE_URL);
     runAccountDeletionPurge = async () => {
-      const purgedAccounts = await withAccountDeletionTransaction(pool, (connection) =>
-        purgeExpiredAccountDeletionRecords(connection),
-      );
-      logger.info({ purgedAccounts }, 'Account deletion cleanup completed');
+      const result = await withAccountDeletionTransaction(pool, async (connection) => ({
+        purgedAccounts: await purgeExpiredAccountDeletionRecords(connection),
+        purgedAuditEvents: await purgeExpiredAuditEvents(connection),
+      }));
+      logger.info(result, 'Account deletion and audit cleanup completed');
     };
     resources.push({
       close: async () => {

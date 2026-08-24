@@ -235,6 +235,26 @@ export const outboxEvents = mysqlTable(
   ],
 );
 
+export const auditEvents = mysqlTable(
+  'audit_events',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    actorUserId: varchar('actor_user_id', { length: 36 }),
+    action: varchar('action', { length: 96 }).notNull(),
+    targetType: varchar('target_type', { length: 32 }).notNull(),
+    targetId: varchar('target_id', { length: 128 }),
+    requesterIpHash: varchar('requester_ip_hash', { length: 64 }),
+    requestId: varchar('request_id', { length: 128 }),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('audit_events_expiry_idx').on(table.expiresAt, table.id),
+    index('audit_events_created_idx').on(table.createdAt, table.id),
+    index('audit_events_target_idx').on(table.targetType, table.targetId, table.createdAt),
+  ],
+);
+
 export const schemaCompatibility = mysqlTable('schema_compatibility', {
   schemaVersion: int('schema_version').primaryKey(),
   migrationId: varchar('migration_id', { length: 128 }).notNull().unique(),
