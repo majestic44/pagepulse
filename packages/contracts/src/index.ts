@@ -324,6 +324,63 @@ export const AuditEventsResponse = Type.Object({
   events: Type.Array(AuditEventSummary, { maxItems: 100 }),
 });
 
+export const MonitorState = Type.Union([
+  Type.Literal('active'),
+  Type.Literal('authentication_required'),
+  Type.Literal('blocked'),
+  Type.Literal('paused'),
+]);
+
+export const MonitorConfiguration = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 160 }),
+    url: Type.String({ minLength: 1, maxLength: 2_048 }),
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorSummary = Type.Object({
+  createdAt: Type.String({ format: 'date-time' }),
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  name: Type.String({ minLength: 1, maxLength: 160 }),
+  revision: Type.Integer({ minimum: 1 }),
+  state: MonitorState,
+  url: Type.String({ minLength: 1, maxLength: 2_048 }),
+});
+
+export const MonitorsResponse = Type.Object({
+  monitors: Type.Array(MonitorSummary),
+});
+
+export const MonitorIdParameters = Type.Object({
+  monitorId: Type.String({ minLength: 1, maxLength: 36 }),
+});
+
+export const InvalidMonitorRequestResponse = Type.Object({
+  error: Type.Literal('Invalid monitor request'),
+});
+
+export const MonitorLimitResponse = Type.Object({
+  error: Type.Literal('Monitor limit reached'),
+});
+
+export const MonitorRevisionConflictResponse = Type.Object({
+  error: Type.Literal('Monitor has changed'),
+});
+
+export const MonitorStateConflictResponse = Type.Object({
+  error: Type.Literal('Monitor state cannot be changed'),
+});
+
+export const MonitorMutationConflictResponse = Type.Union([
+  MonitorRevisionConflictResponse,
+  MonitorStateConflictResponse,
+]);
+
+export const MonitorUnavailableResponse = Type.Object({
+  error: Type.Literal('Monitor configuration temporarily unavailable'),
+});
+
 export const MemberIdParameters = Type.Object({
   memberId: Type.String({ minLength: 1, maxLength: 36 }),
 });

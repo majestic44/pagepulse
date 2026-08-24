@@ -19,8 +19,15 @@ import {
   hashAuditRequesterIp,
   MemberLifecycleStateError,
   MemberNotFoundError,
+  MonitorAccessError,
+  MonitorInputError,
+  MonitorLimitError,
+  MonitorNotFoundError,
+  MonitorRevisionConflictError,
+  MonitorStateError,
   probeDatabase,
   type ActiveSession,
+  type Monitor,
 } from '@pagepulse/db';
 import {
   AccountDeletionConflictResponse,
@@ -36,12 +43,21 @@ import {
   EmailVerificationRequest,
   ForbiddenResponse,
   HealthResponse,
+  InvalidMonitorRequestResponse,
   InvalidAuthenticationRequestResponse,
   InvalidAccountDeletionConfirmationResponse,
   LoginRequest,
   ManagedMembersResponse,
   MemberIdParameters,
   MemberLifecycleConflictResponse,
+  MonitorConfiguration,
+  MonitorIdParameters,
+  MonitorLimitResponse,
+  MonitorMutationConflictResponse,
+  MonitorRevisionConflictResponse,
+  MonitorSummary,
+  MonitorsResponse,
+  MonitorUnavailableResponse,
   NotFoundResponse,
   PasswordResetRequest,
   RecoveryCodesResponse,
@@ -66,6 +82,7 @@ import {
 import { createVerificationEmailDelivery } from './email-delivery.js';
 import { createHealthService, type HealthService } from './health.js';
 import { createMemberService } from './members.js';
+import { createMonitorService } from './monitors.js';
 import {
   clearSessionCookie,
   createSessionService,
@@ -148,6 +165,7 @@ async function createDefaultAuthenticationDependencies(
       emailDelivery: createVerificationEmailDelivery(environment),
       service,
       members: createMemberService({ pool }),
+      monitors: createMonitorService({ pool }),
       sessions: createSessionService({
         pool,
         timing: {
@@ -197,6 +215,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     if (
       request.url.startsWith('/api/v1/auth/') ||
       request.url.startsWith('/api/v1/account/') ||
+      request.url.startsWith('/api/v1/monitors') ||
       request.url.startsWith('/api/v1/owner/') ||
       request.url.startsWith('/api/v1/system/diagnostics')
     ) {
@@ -281,6 +300,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
     monitorLimit: member.monitorLimit,
     status: member.status,
   });
+  const serializeMonitor = (monitor: Monitor) => ({
+    createdAt: monitor.createdAt.toISOString(),
+    id: monitor.id,
+    name: monitor.name,
+    revision: monitor.revision,
+    state: monitor.state,
+    url: monitor.url,
+  });
   const auditContext = (request: FastifyRequest) => ({
     requesterIpHash: hashAuditRequesterIp(request.ip),
     requestId: request.id,
@@ -323,11 +350,50 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const invalidAccountDeletionConfirmationResponse = {
     error: 'Invalid account deletion confirmation',
   } as const;
+  const invalidMonitorResponse = { error: 'Invalid monitor request' } as const;
+  const monitorLimitResponse = { error: 'Monitor limit reached' } as const;
+  const monitorRevisionConflictResponse = { error: 'Monitor has changed' } as const;
+  const monitorStateConflictResponse = { error: 'Monitor state cannot be changed' } as const;
+  const monitorUnavailableResponse = {
+    error: 'Monitor configuration temporarily unavailable',
+  } as const;
   const isInvalidAuthenticationRequest = (error: unknown) =>
     error instanceof AuthenticationTokenError ||
     error instanceof AuthenticationStateError ||
     error instanceof EmailValidationError ||
     error instanceof PasswordValidationError;
+  const monitorRevision = (value: string | string[] | undefined) => {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const match = /^"?([1-9][0-9]*)"?$/u.exec(value);
+    if (!match) {
+      return undefined;
+    }
+    const revision = Number(match[1]);
+    return Number.isSafeInteger(revision) ? revision : undefined;
+  };
+  const sendMonitorError = (reply: FastifyReply, error: unknown) => {
+    if (error instanceof MonitorAccessError) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+    if (error instanceof MonitorInputError) {
+      return reply.code(400).send(invalidMonitorResponse);
+    }
+    if (error instanceof MonitorLimitError) {
+      return reply.code(409).send(monitorLimitResponse);
+    }
+    if (error instanceof MonitorNotFoundError) {
+      return reply.code(404).send({ error: 'Not found' });
+    }
+    if (error instanceof MonitorRevisionConflictError) {
+      return reply.code(409).send(monitorRevisionConflictResponse);
+    }
+    if (error instanceof MonitorStateError) {
+      return reply.code(409).send(monitorStateConflictResponse);
+    }
+    return reply.code(503).send(monitorUnavailableResponse);
+  };
 
   app.get(
     '/api/v1/system/diagnostics',
@@ -998,6 +1064,258 @@ export async function buildApp(options: BuildAppOptions = {}) {
           return reply.code(401).send({ error: 'Unauthorized' });
         }
         return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.get(
+    '/api/v1/monitors',
+    {
+      schema: {
+        response: {
+          200: MonitorsResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const monitors = await current.authentication.monitors.list(current.session.userId);
+        return { monitors: monitors.map(serializeMonitor) };
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Body: { name: string; url: string } }>(
+    '/api/v1/monitors',
+    {
+      schema: {
+        body: MonitorConfiguration,
+        response: {
+          201: MonitorSummary,
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          409: MonitorLimitResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const monitor = await current.authentication.monitors.create(
+          current.session.userId,
+          request.body,
+        );
+        return reply
+          .code(201)
+          .header('ETag', `"${monitor.revision}"`)
+          .send(serializeMonitor(monitor));
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorSummary,
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const monitor = await current.authentication.monitors.get(
+          current.session.userId,
+          request.params.monitorId,
+        );
+        return reply.header('ETag', `"${monitor.revision}"`).send(serializeMonitor(monitor));
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.put<{ Body: { name: string; url: string }; Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId',
+    {
+      schema: {
+        body: MonitorConfiguration,
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorSummary,
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorResponse);
+      }
+      try {
+        const monitor = await current.authentication.monitors.update(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+          request.body,
+        );
+        return reply.header('ETag', `"${monitor.revision}"`).send(serializeMonitor(monitor));
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  async function transitionCurrentMonitor(
+    request: FastifyRequest<{ Params: { monitorId: string } }>,
+    reply: FastifyReply,
+    transition: (
+      authentication: AuthenticationDependencies,
+      userId: string,
+      monitorId: string,
+      expectedRevision: number,
+    ) => Promise<Monitor>,
+  ) {
+    const current = await getCurrentSession(request, reply);
+    if (!current) {
+      return reply;
+    }
+    const expectedRevision = monitorRevision(request.headers['if-match']);
+    if (!expectedRevision) {
+      return reply.code(400).send(invalidMonitorResponse);
+    }
+    try {
+      const monitor = await transition(
+        current.authentication,
+        current.session.userId,
+        request.params.monitorId,
+        expectedRevision,
+      );
+      return reply.header('ETag', `"${monitor.revision}"`).send(serializeMonitor(monitor));
+    } catch (error) {
+      return sendMonitorError(reply, error);
+    }
+  }
+
+  app.post<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/pause',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorSummary,
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorMutationConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    (request, reply) =>
+      transitionCurrentMonitor(
+        request,
+        reply,
+        (authentication, userId, monitorId, expectedRevision) =>
+          authentication.monitors.pause(userId, monitorId, expectedRevision),
+      ),
+  );
+
+  app.post<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/resume',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorSummary,
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorMutationConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    (request, reply) =>
+      transitionCurrentMonitor(
+        request,
+        reply,
+        (authentication, userId, monitorId, expectedRevision) =>
+          authentication.monitors.resume(userId, monitorId, expectedRevision),
+      ),
+  );
+
+  app.delete<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          204: Type.Null(),
+          400: InvalidMonitorRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorResponse);
+      }
+      try {
+        await current.authentication.monitors.delete(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+        );
+        return reply.code(204).send();
+      } catch (error) {
+        return sendMonitorError(reply, error);
       }
     },
   );

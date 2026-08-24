@@ -26,6 +26,13 @@ const milestones = [
     status: 'Complete',
     title: 'Identity and administration',
   },
+  {
+    detail:
+      'Members can create, revise, pause, resume and delete public monitor configurations with protected revisions.',
+    label: 'Phase 3',
+    status: 'In progress',
+    title: 'Monitor configuration',
+  },
 ] as const;
 
 type SessionSummary = Readonly<{
@@ -84,6 +91,20 @@ type AuditEventSummary = Readonly<{
 type OwnerAuditState =
   | Readonly<{ kind: 'forbidden' | 'loading' | 'signed-out' }>
   | Readonly<{ events: ReadonlyArray<AuditEventSummary>; kind: 'ready' }>;
+
+type MonitorSummary = Readonly<{
+  createdAt: string;
+  id: string;
+  name: string;
+  revision: number;
+  state: 'active' | 'authentication_required' | 'blocked' | 'paused';
+  url: string;
+}>;
+
+type MonitorManagementState =
+  | Readonly<{ kind: 'loading' }>
+  | Readonly<{ kind: 'signed-out' }>
+  | Readonly<{ kind: 'ready'; monitors: ReadonlyArray<MonitorSummary> }>;
 
 const pagePath = window.location.pathname;
 const oneTimeToken =
@@ -738,6 +759,371 @@ function AccountSessions() {
   );
 }
 
+function MonitorManagement() {
+  const [state, setState] = useState<MonitorManagementState>({ kind: 'loading' });
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [editing, setEditing] = useState<MonitorSummary>();
+  const [message, setMessage] = useState<string>();
+  const [submitting, setSubmitting] = useState<string>();
+
+  const loadMonitors = useCallback(async () => {
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/monitors', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        setState({ kind: 'signed-out' });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to load monitors');
+      }
+      const payload = (await response.json()) as { monitors: ReadonlyArray<MonitorSummary> };
+      setState({ kind: 'ready', monitors: payload.monitors });
+    } catch {
+      setMessage('Monitor configuration is temporarily unavailable. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMonitors();
+  }, [loadMonitors]);
+
+  function replaceMonitor(updated: MonitorSummary) {
+    setState((current) =>
+      current.kind === 'ready'
+        ? {
+            kind: 'ready',
+            monitors: current.monitors.map((monitor) =>
+              monitor.id === updated.id ? updated : monitor,
+            ),
+          }
+        : current,
+    );
+  }
+
+  async function createMonitor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting('create');
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/monitors', {
+        body: JSON.stringify({ name, url }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 409) {
+        setMessage('Your monitor limit has been reached.');
+        return;
+      }
+      if (response.status === 400) {
+        setMessage('Enter a name and a plain HTTP or HTTPS URL without embedded credentials.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to create monitor');
+      }
+      const monitor = (await response.json()) as MonitorSummary;
+      setState((current) =>
+        current.kind === 'ready'
+          ? { kind: 'ready', monitors: [...current.monitors, monitor] }
+          : current,
+      );
+      setName('');
+      setUrl('');
+      setMessage('Monitor configuration created. Scheduling is configured in the next step.');
+    } catch {
+      setMessage('Monitor configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function saveMonitor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) {
+      return;
+    }
+    setSubmitting(editing.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(editing.id)}`, {
+        body: JSON.stringify({ name, url }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'If-Match': `"${editing.revision}"` },
+        method: 'PUT',
+      });
+      if (response.status === 409) {
+        await loadMonitors();
+        setEditing(undefined);
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (response.status === 400) {
+        setMessage('Enter a name and a plain HTTP or HTTPS URL without embedded credentials.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to update monitor');
+      }
+      const monitor = (await response.json()) as MonitorSummary;
+      replaceMonitor(monitor);
+      setEditing(undefined);
+      setName('');
+      setUrl('');
+      setMessage('Monitor configuration updated.');
+    } catch {
+      setMessage('Monitor configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function changeMonitorState(monitor: MonitorSummary, action: 'pause' | 'resume') {
+    setSubmitting(monitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(monitor.id)}/${action}`, {
+        credentials: 'same-origin',
+        headers: { 'If-Match': `"${monitor.revision}"` },
+        method: 'POST',
+      });
+      if (response.status === 409) {
+        await loadMonitors();
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Unable to ${action} monitor`);
+      }
+      replaceMonitor((await response.json()) as MonitorSummary);
+      setMessage(action === 'pause' ? 'Monitor paused.' : 'Monitor resumed.');
+    } catch {
+      setMessage('Monitor configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function deleteCurrentMonitor(monitor: MonitorSummary) {
+    if (!window.confirm(`Delete “${monitor.name}”? This removes only its monitor configuration.`)) {
+      return;
+    }
+    setSubmitting(monitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(monitor.id)}`, {
+        credentials: 'same-origin',
+        headers: { 'If-Match': `"${monitor.revision}"` },
+        method: 'DELETE',
+      });
+      if (response.status === 409) {
+        await loadMonitors();
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (!response.ok && response.status !== 204) {
+        throw new Error('Unable to delete monitor');
+      }
+      setState((current) =>
+        current.kind === 'ready'
+          ? { kind: 'ready', monitors: current.monitors.filter((item) => item.id !== monitor.id) }
+          : current,
+      );
+      if (editing?.id === monitor.id) {
+        setEditing(undefined);
+        setName('');
+        setUrl('');
+      }
+      setMessage('Monitor configuration deleted.');
+    } catch {
+      setMessage('Monitor configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  if (state.kind === 'loading') {
+    return (
+      <main className="shell account-shell" aria-live="polite">
+        <p className="eyebrow">MONITORS</p>
+        <h1>Loading monitor configuration…</h1>
+      </main>
+    );
+  }
+
+  if (state.kind === 'signed-out') {
+    return (
+      <main className="shell account-shell">
+        <a className="back-link" href="/">
+          ← Project status
+        </a>
+        <p className="eyebrow">MONITORS</p>
+        <h1>Sign in to manage monitors.</h1>
+        <p className="account-intro">
+          Use Account security to create a browser session, then return here to manage your own
+          monitor configurations.
+        </p>
+        <a className="account-link inline-link" href="/account/sessions">
+          Go to Account security
+        </a>
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">MONITORS</p>
+      <h1>Monitor configuration</h1>
+      <p className="account-intro">
+        Create public HTTP or HTTPS monitors without embedded credentials. Your account limit is
+        enforced by the server; new accounts start with up to 50 monitors. Scheduling and extraction
+        configuration follow in the next Phase 3 items.
+      </p>
+
+      <form className="sign-in-form" onSubmit={(event) => void createMonitor(event)}>
+        <h2>Create monitor</h2>
+        <label>
+          Name
+          <input
+            autoComplete="off"
+            maxLength={160}
+            onChange={(event) => setName(event.target.value)}
+            required
+            type="text"
+            value={name}
+          />
+        </label>
+        <label>
+          Public URL
+          <input
+            autoComplete="url"
+            maxLength={2048}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://example.com/announcements"
+            required
+            type="url"
+            value={url}
+          />
+        </label>
+        <button disabled={submitting !== undefined} type="submit">
+          Create monitor
+        </button>
+      </form>
+
+      {editing ? (
+        <form className="sign-in-form totp-panel" onSubmit={(event) => void saveMonitor(event)}>
+          <h2>Edit {editing.name}</h2>
+          <label>
+            Name
+            <input
+              autoComplete="off"
+              maxLength={160}
+              onChange={(event) => setName(event.target.value)}
+              required
+              type="text"
+              value={name}
+            />
+          </label>
+          <label>
+            Public URL
+            <input
+              autoComplete="url"
+              maxLength={2048}
+              onChange={(event) => setUrl(event.target.value)}
+              required
+              type="url"
+              value={url}
+            />
+          </label>
+          <div className="member-actions">
+            <button disabled={submitting !== undefined} type="submit">
+              Save changes
+            </button>
+            <button
+              disabled={submitting !== undefined}
+              onClick={() => {
+                setEditing(undefined);
+                setName('');
+                setUrl('');
+              }}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      <h2 className="totp-panel">Your monitors</h2>
+      {state.monitors.length === 0 ? (
+        <p className="account-intro">No monitor configurations yet.</p>
+      ) : (
+        <ol className="member-list" aria-live="polite">
+          {state.monitors.map((monitor) => (
+            <li key={monitor.id}>
+              <div>
+                <div className="session-heading">
+                  <h2>{monitor.name}</h2>
+                  <strong>{monitor.state.replaceAll('_', ' ')}</strong>
+                </div>
+                <p>{monitor.url}</p>
+                <p>Created {formatDate(monitor.createdAt)}</p>
+              </div>
+              <div className="member-actions">
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => {
+                    setEditing(monitor);
+                    setName(monitor.name);
+                    setUrl(monitor.url);
+                  }}
+                  type="button"
+                >
+                  Edit
+                </button>
+                {monitor.state === 'active' ? (
+                  <button
+                    disabled={submitting !== undefined}
+                    onClick={() => void changeMonitorState(monitor, 'pause')}
+                    type="button"
+                  >
+                    Pause
+                  </button>
+                ) : null}
+                {monitor.state === 'paused' ? (
+                  <button
+                    disabled={submitting !== undefined}
+                    onClick={() => void changeMonitorState(monitor, 'resume')}
+                    type="button"
+                  >
+                    Resume
+                  </button>
+                ) : null}
+                <button
+                  className="danger-button"
+                  disabled={submitting !== undefined}
+                  onClick={() => void deleteCurrentMonitor(monitor)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+    </main>
+  );
+}
+
 function OwnerMembers() {
   const [state, setState] = useState<OwnerMembersState>({ kind: 'loading' });
   const [message, setMessage] = useState<string>();
@@ -1344,6 +1730,9 @@ function App() {
         <a className="account-link" href="/account/sessions">
           Account security
         </a>
+        <a className="account-link" href="/monitors">
+          Monitors
+        </a>
         <a className="account-link" href="/owner/members">
           Member administration
         </a>
@@ -1369,7 +1758,7 @@ function App() {
           Local owner onboarding now sends one-time verification links to development-only Mailpit.
           Production verification and password-reset provider delivery remain deferred.
           Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
-          available; monitoring screens follow.
+          available. Monitor configuration is ready; scheduling and extraction controls follow next.
         </p>
       </section>
 
@@ -1394,10 +1783,10 @@ function App() {
 
       <section className="next" aria-labelledby="next-title">
         <p className="eyebrow">UP NEXT</p>
-        <h2 id="next-title">Identity is complete. Monitor configuration is next.</h2>
+        <h2 id="next-title">Monitor configuration is in progress.</h2>
         <p>
-          Phase 3 begins with monitor creation, safety validation, pause/resume controls and member
-          limits. Page-change detection follows after monitor configuration is in place.
+          Public monitor CRUD, revisions, pause/resume controls and member limits are ready.
+          Scheduling, target extraction and change rules follow before page-change detection begins.
         </p>
       </section>
     </main>
@@ -1411,13 +1800,15 @@ const Page =
       ? () => <EmailVerification initialToken={oneTimeToken} />
       : pagePath === '/account/sessions'
         ? AccountSessions
-        : pagePath === '/account/deletion/recover'
-          ? AccountDeletionRecovery
-          : pagePath === '/owner/members'
-            ? OwnerMembers
-            : pagePath === '/owner/audit-events'
-              ? OwnerAuditEvents
-              : App;
+        : pagePath === '/monitors'
+          ? MonitorManagement
+          : pagePath === '/account/deletion/recover'
+            ? AccountDeletionRecovery
+            : pagePath === '/owner/members'
+              ? OwnerMembers
+              : pagePath === '/owner/audit-events'
+                ? OwnerAuditEvents
+                : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
