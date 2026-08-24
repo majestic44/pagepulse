@@ -76,6 +76,13 @@ token.
   revokes all other sessions, and returns the replacement set exactly once.
 - `DELETE /api/v1/account/totp` accepts `{ code }` or `{ recoveryCode }` and disables the factor after proof, revoking
   all other sessions.
+- `POST /api/v1/account/deletion` accepts the current `{ password }` plus exactly one TOTP proof when the account has
+  an authenticator app. It is limited to active member accounts, immediately revokes every session, schedules permanent
+  deletion seven days later, and returns a one-time recovery token with the deadline. The browser must display the token
+  once and never persist it.
+- `POST /api/v1/account/deletion/recover` accepts `{ token }` without a session, consumes an unexpired one-time
+  recovery token, restores the member account to active, and requires a new sign-in. Invalid, expired, or consumed
+  tokens receive the same `401` response.
 - `GET /api/v1/owner/members` is owner-only and returns redeemed member administration details. It never returns
   session, token, TOTP, or credential material.
 - `POST /api/v1/owner/members/{memberId}/suspend` is owner-only, transitions an active member to suspended, and
@@ -89,9 +96,10 @@ token.
   `202 { "status": "reset_requested" }`, preventing account enumeration.
 - `POST /api/v1/auth/password-resets/confirm` accepts `{ token, password }` and returns `204` on success.
 
-Invalid redemption, verification and reset requests receive one generic `400` response. Login receives a generic
-`401`. The API rate-limits login, redemption/verification and reset operations by a one-way hash of the requester IP;
-when Redis cannot enforce that limit, it returns `503` rather than processing the request.
+Invalid redemption, verification and reset requests receive one generic `400` response. Login and invalid deletion
+confirmation receive generic `401` responses. The API rate-limits login, redemption/verification, reset, and deletion
+operations by a one-way hash of the requester IP; when Redis cannot enforce that limit, it returns `503` rather than
+processing the request.
 
 Sessions are authoritative in MariaDB, expire after eight idle hours and always within 30 days by default, and are
 rotated on successful login. Completing a password reset revokes all active sessions for that account.
@@ -104,6 +112,8 @@ Member management is enforced at the API boundary, not only in the owner UI. Own
 routes against owner accounts, and member sessions are invalidated by both suspension and removal. Security/admin
 audit events for those actions are the next Phase 2 item.
 
-Outbound email delivery is deliberately deferred to Phase 5. This foundation creates only token hashes and does not
-return, log, queue, or persist a recoverable plaintext token. Consequently, a deployment cannot complete email
-verification or password-reset delivery until the future delivery adapter issues a fresh token and sends it directly.
+Outbound email delivery is deliberately deferred to Phase 5. Verification and password-reset flows store only token
+hashes and do not return a recoverable plaintext token. Account deletion is the narrowly scoped exception: its recovery
+token is displayed once to the already authenticated account holder, never logged or queued, and is stored only as a
+hash. A deployment cannot complete email verification or password-reset delivery until a future delivery adapter issues
++a fresh token and sends it directly.

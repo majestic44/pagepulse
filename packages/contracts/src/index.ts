@@ -171,6 +171,34 @@ export const TotpRecoveryCodeRequest = Type.Object(
 
 export const TotpProofRequest = Type.Union([TotpCodeRequest, TotpRecoveryCodeRequest]);
 
+export const AccountDeletionRequest = Type.Union([
+  Type.Object(
+    {
+      code: Type.String({ minLength: 6, maxLength: 6, pattern: '^\\d{6}$' }),
+      password: Type.String({ minLength: 1, maxLength: 4_096 }),
+    },
+    queuePayloadOptions,
+  ),
+  Type.Object(
+    {
+      password: Type.String({ minLength: 1, maxLength: 4_096 }),
+      recoveryCode: Type.String({ minLength: 12, maxLength: 32 }),
+    },
+    queuePayloadOptions,
+  ),
+  Type.Object(
+    {
+      password: Type.String({ minLength: 1, maxLength: 4_096 }),
+    },
+    queuePayloadOptions,
+  ),
+]);
+
+export const AccountDeletionRecoveryRequest = Type.Object(
+  { token: Type.String({ minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }) },
+  queuePayloadOptions,
+);
+
 export const TokenRequest = Type.Object(
   { token: Type.String({ minLength: 1, maxLength: 256 }) },
   queuePayloadOptions,
@@ -199,6 +227,19 @@ export const TooManyRequestsResponse = Type.Object({
 
 export const AuthenticationUnavailableResponse = Type.Object({
   error: Type.Literal('Authentication temporarily unavailable'),
+});
+
+export const AccountDeletionScheduledResponse = Type.Object({
+  deletionDeadline: Type.String({ format: 'date-time' }),
+  recoveryToken: Type.String({ minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }),
+});
+
+export const InvalidAccountDeletionConfirmationResponse = Type.Object({
+  error: Type.Literal('Invalid account deletion confirmation'),
+});
+
+export const AccountDeletionConflictResponse = Type.Object({
+  error: Type.Literal('Account deletion cannot be completed'),
 });
 
 export const SessionSummary = Type.Object({

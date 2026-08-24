@@ -240,6 +240,14 @@ h3 {
   margin-top: 3rem;
   padding-top: 2.5rem;
 }
+.deletion-panel {
+  border-top: 1px solid var(--line);
+  margin-top: 3rem;
+  padding-top: 2.5rem;
+}
+.deletion-panel h2 {
+  margin: 0.5rem 0 1rem;
+}
 .totp-panel h2 {
   margin: 0.5rem 0 1rem;
 }

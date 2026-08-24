@@ -12,8 +12,8 @@ export const MIGRATION_LOCK_NAME = 'pagepulse_migrations';
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 60;
 
 export const currentSchemaCompatibility = Object.freeze({
-  schemaVersion: 6,
-  migrationId: 'totp-authentication',
+  schemaVersion: 7,
+  migrationId: 'account-deletion-recovery',
   minimumAppVersion: '0.0.0',
 });
 

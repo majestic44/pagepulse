@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PasswordValidationError, type RateLimitStore } from '@pagepulse/auth';
 import { loadEnvironment } from '@pagepulse/config';
 import {
+  AccountDeletionTokenError,
   MemberLifecycleStateError,
   type ActiveSession,
   type AuthenticationUser,
 } from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
+import type { AccountDeletionService } from './account-deletion.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
 import type { MemberService } from './members.js';
@@ -24,8 +26,18 @@ function createAuthenticationDependencies(
   sessions: Partial<SessionService> = {},
   totp: Partial<TotpService> = {},
   members: Partial<MemberService> = {},
+  accountDeletion: Partial<AccountDeletionService> = {},
 ): AuthenticationDependencies {
   return {
+    accountDeletion: {
+      purgeExpired: vi.fn().mockResolvedValue(0),
+      recover: vi.fn().mockResolvedValue(undefined),
+      request: vi.fn().mockResolvedValue({
+        deadline: new Date('2026-08-31T00:00:00.000Z'),
+        token: 'C'.repeat(43),
+      }),
+      ...accountDeletion,
+    },
     members: {
       list: vi.fn().mockResolvedValue([]),
       reactivate: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +46,7 @@ function createAuthenticationDependencies(
       ...members,
     },
     rateLimitPolicies: {
+      deletion: { limit: 3, windowMs: 60_000 },
       login: { limit: 5, windowMs: 60_000 },
       redemption: { limit: 5, windowMs: 60_000 },
       reset: { limit: 3, windowMs: 60_000 },
@@ -53,6 +66,7 @@ function createAuthenticationDependencies(
         token: 'verification-token-must-not-be-returned',
       }),
       requestPasswordReset: vi.fn().mockResolvedValue(undefined),
+      verifyCurrentPassword: vi.fn().mockResolvedValue(false),
       ...service,
     },
     sessions: {
@@ -86,6 +100,7 @@ function createAuthenticationDependencies(
       disable: vi.fn().mockResolvedValue(undefined),
       isEnabled: vi.fn().mockResolvedValue(false),
       replaceRecoveryCodes: vi.fn().mockResolvedValue(['ABCD-EFGH-JKLM']),
+      verify: vi.fn().mockResolvedValue(undefined),
       ...totp,
     },
   };
@@ -521,6 +536,82 @@ describe('authentication contract', () => {
     expect(response.statusCode).toBe(204);
     expect(response.headers['set-cookie']).toContain('Max-Age=0');
     expect(authentication.sessions.revoke).toHaveBeenCalledWith('owner-id', 'session-id');
+  });
+
+  it('requires the current password and factor proof before scheduling deletion, then clears the session', async () => {
+    const authentication = createAuthenticationDependencies(
+      { verifyCurrentPassword: vi.fn().mockResolvedValue(true) },
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+      { isEnabled: vi.fn().mockResolvedValue(true) },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/deletion',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      payload: { code: '123456', password: 'a secure password' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['set-cookie']).toContain('Max-Age=0');
+    expect(response.json()).toEqual({
+      deletionDeadline: '2026-08-31T00:00:00.000Z',
+      recoveryToken: 'C'.repeat(43),
+    });
+    expect(authentication.service.verifyCurrentPassword).toHaveBeenCalledWith(
+      'member-id',
+      'a secure password',
+    );
+    expect(authentication.totp.verify).toHaveBeenCalledWith('member-id', { code: '123456' });
+    expect(authentication.accountDeletion.request).toHaveBeenCalledWith('member-id');
+  });
+
+  it('does not schedule deletion with an invalid password confirmation', async () => {
+    const authentication = createAuthenticationDependencies(
+      { verifyCurrentPassword: vi.fn().mockResolvedValue(false) },
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/deletion',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      payload: { password: 'incorrect password' },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: 'Invalid account deletion confirmation' });
+    expect(authentication.accountDeletion.request).not.toHaveBeenCalled();
+  });
+
+  it('recovers a deletion only with a valid opaque recovery token', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { recover: vi.fn().mockRejectedValue(new AccountDeletionTokenError()) },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/account/deletion/recover',
+      payload: { token: 'C'.repeat(43) },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: 'Unauthorized' });
+    expect(response.body).not.toContain('recovery token is invalid');
   });
 
   it('allows an owner to list and manage member lifecycle state', async () => {

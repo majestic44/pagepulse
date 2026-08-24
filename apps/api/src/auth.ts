@@ -11,6 +11,7 @@ import {
   type AuthenticationUser,
   AccountTokenTypes,
   findAuthenticationUser,
+  findAuthenticationUserById,
   issuePasswordReset,
   redeemInvitation,
   redeemOwnerSetup,
@@ -21,6 +22,7 @@ import {
 } from '@pagepulse/db';
 
 import type { SessionService } from './session.js';
+import type { AccountDeletionService } from './account-deletion.js';
 import type { MemberService } from './members.js';
 import type { TotpService } from './totp.js';
 
@@ -41,6 +43,7 @@ export type AuthenticationService = Readonly<{
   redeemInvitation: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   redeemOwnerSetup: (token: string, password: string) => Promise<AuthenticationTokenIssue>;
   requestPasswordReset: (email: string) => Promise<AuthenticationTokenIssue | undefined>;
+  verifyCurrentPassword: (userId: string, password: string) => Promise<boolean>;
 }>;
 
 export type AuthenticationServiceOptions = Readonly<{
@@ -152,10 +155,21 @@ export async function createAuthenticationService({
       );
       return issued ? { expiresAt: reset.expiresAt, token: reset.token } : undefined;
     },
+
+    async verifyCurrentPassword(userId, password) {
+      const user = await withAuthenticationTransaction(pool, (connection) =>
+        findAuthenticationUserById(connection, userId),
+      );
+      if (!user || user.status !== 'active' || !user.emailVerified || user.passwordHash === null) {
+        return false;
+      }
+      return verifyPassword(password, user.passwordHash);
+    },
   };
 }
 
 export type AuthenticationRateLimitPolicies = Readonly<{
+  deletion: Readonly<{ limit: number; windowMs: number }>;
   login: Readonly<{ limit: number; windowMs: number }>;
   redemption: Readonly<{ limit: number; windowMs: number }>;
   reset: Readonly<{ limit: number; windowMs: number }>;
@@ -163,6 +177,7 @@ export type AuthenticationRateLimitPolicies = Readonly<{
 }>;
 
 export type AuthenticationDependencies = Readonly<{
+  accountDeletion: AccountDeletionService;
   members: MemberService;
   rateLimitPolicies: AuthenticationRateLimitPolicies;
   rateLimitStore: RateLimitStore;

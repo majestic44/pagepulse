@@ -52,6 +52,13 @@ const environmentSchema = z
       .min(1_000)
       .max(86_400_000)
       .default(3_600_000),
+    AUTH_DELETION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(20).default(3),
+    AUTH_DELETION_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(3_600_000),
     AUTH_REDEMPTION_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(5),
     AUTH_REDEMPTION_RATE_LIMIT_WINDOW_MS: z.coerce
       .number()
@@ -72,6 +79,12 @@ const environmentSchema = z
       .min(60_000)
       .max(3_600_000)
       .default(300_000),
+    ACCOUNT_DELETION_SWEEP_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(86_400_000)
+      .default(3_600_000),
     HTTP_FETCH_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
     HTTP_FETCH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
     HTTP_FETCH_MAX_BYTES: z.coerce.number().int().min(1_024).max(100_000_000).default(5_242_880),

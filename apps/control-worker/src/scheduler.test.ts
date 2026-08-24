@@ -7,7 +7,7 @@ import {
   type QueueForName,
 } from '@pagepulse/queue';
 
-import { createSchedulerReconciler, runInitialSchedulerReconciliation } from './scheduler.js';
+import { createSchedulerReconciler, runInitialWorkerReconciliation } from './scheduler.js';
 
 const schedules: MonitorSchedule[] = [
   {
@@ -28,7 +28,7 @@ describe('scheduler reconciliation service', () => {
     const reconcile = vi.fn().mockRejectedValue(startupError);
     const shutdown = vi.fn().mockResolvedValue(undefined);
 
-    await expect(runInitialSchedulerReconciliation(reconcile, shutdown)).rejects.toBe(startupError);
+    await expect(runInitialWorkerReconciliation(reconcile, shutdown)).rejects.toBe(startupError);
 
     expect(shutdown).toHaveBeenCalledWith('startup_failure');
   });

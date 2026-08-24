@@ -43,6 +43,13 @@
       "when": 1787499656536,
       "tag": "0005_brown_microbe",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787563692216,
+      "tag": "0006_account-deletion-recovery",
+      "breakpoints": true
     }
   ]
 }
