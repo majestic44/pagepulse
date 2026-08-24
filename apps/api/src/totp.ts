@@ -66,6 +66,7 @@ export type TotpService = Readonly<{
     currentSessionId: string,
     proof: TotpProof,
   ) => Promise<ReadonlyArray<string>>;
+  verify: (userId: string, proof: TotpProof) => Promise<void>;
 }>;
 
 export type TotpServiceOptions = Readonly<{
@@ -284,6 +285,13 @@ export function createTotpService({
         await revokeSessionsForUser(connection, userId, current, currentSessionId);
       });
       return recoveryCodes;
+    },
+
+    async verify(userId, proof) {
+      const current = now();
+      await withTotpTransaction(pool, (connection) =>
+        verifyCurrentFactor(connection, userId, proof, current),
+      );
     },
   };
 }

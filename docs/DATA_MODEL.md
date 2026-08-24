@@ -2,7 +2,7 @@
 
 ## Identity and authorization
 
-- `users`: email, password hash, verification state, timezone, theme, status, deletion deadline.
+- `users`: email, password hash, verification state, timezone, theme, status, deletion-request timestamp, and deletion deadline.
 - Member lifecycle uses the existing `users.status`: an owner may move an active member to `suspended` and later
   restore that same member to `active`; owner-targeted lifecycle actions are rejected. Owner removal permanently
   deletes a member and cascades member-owned records after revoking active sessions.
@@ -45,8 +45,12 @@
 
 ## Deletion and retention
 
-- User deletion is soft for seven days; sign-in is blocked during recovery unless deletion is cancelled.
-- Permanent deletion destroys member credential data keys first, then removes personal content in ordered batches.
+- A member who confirms their current password (and TOTP factor when enabled) moves to `deleting` with a seven-day
+  `deletion_deadline`. Every session is revoked, sign-in is blocked, and a single hashed account-deletion recovery token
+  can return the member to `active` before the deadline.
+- The maintenance worker locks and deletes expired `deleting` member records in bounded MariaDB batches. Existing
+  foreign keys remove dependent personal records; future credential-profile data-key destruction must precede deletion
+  when that table is introduced.
 - Snapshots/screenshots expire after seven days.
 - Checks and alert deliveries expire after 30 days.
 - Audit events expire after 90 days but contain no secret or private fetched content.
@@ -66,5 +70,6 @@
   from a verified pre-migration backup after session endpoints are disabled; it must not be dropped in place on a live
   deployment.
 - Migration `0005_brown_microbe` is additive: it adds encrypted TOTP factor, pending enrollment, opaque login
-  challenge, and one-way recovery-code records. Rollback is a reviewed restore from a verified pre-migration backup
+  challenge, and one-way recovery-code records. Migration `0006_account-deletion-recovery` is additive: it adds
+  deletion timing, recovery-token state, and its cleanup index. Rollback is a reviewed restore from a verified pre-migration backup
   after TOTP routes are disabled; it must not be dropped in place on a live deployment.

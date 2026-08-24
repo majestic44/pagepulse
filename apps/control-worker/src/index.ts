@@ -5,6 +5,8 @@ import {
   listActiveMonitorSchedules,
   listPendingOutboxEvents,
   markOutboxEventPublished,
+  purgeExpiredAccountDeletions as purgeExpiredAccountDeletionRecords,
+  withAccountDeletionTransaction,
 } from '@pagepulse/db';
 import {
   createQueue,
@@ -16,7 +18,7 @@ import {
   type QueueResource,
 } from '@pagepulse/queue';
 
-import { createSchedulerReconciler, runInitialSchedulerReconciliation } from './scheduler.js';
+import { createSchedulerReconciler, runInitialWorkerReconciliation } from './scheduler.js';
 
 const queueNamesByRole: Record<Environment['WORKER_ROLE'], ReadonlyArray<QueueName>> = {
   scheduler: [QueueNames.monitorSchedule],
@@ -50,6 +52,7 @@ async function startControlWorker() {
   });
 
   const resources: QueueResource[] = [...workers];
+  let accountDeletionTimer: NodeJS.Timeout | undefined;
   let logReconciliation: (() => Promise<void>) | undefined;
   let reconciliationTimer: NodeJS.Timeout | undefined;
   if (role === 'scheduler') {
@@ -93,6 +96,25 @@ async function startControlWorker() {
     });
   }
 
+  let runAccountDeletionPurge: (() => Promise<void>) | undefined;
+  if (role === 'maintenance') {
+    const pool = createDatabasePool(environment.DATABASE_URL);
+    runAccountDeletionPurge = async () => {
+      const purgedAccounts = await withAccountDeletionTransaction(pool, (connection) =>
+        purgeExpiredAccountDeletionRecords(connection),
+      );
+      logger.info({ purgedAccounts }, 'Account deletion cleanup completed');
+    };
+    resources.push({
+      close: async () => {
+        if (accountDeletionTimer) {
+          clearInterval(accountDeletionTimer);
+        }
+        await pool.end();
+      },
+    });
+  }
+
   const shutdown = installGracefulShutdown({
     connection,
     onFailure: (signal, error) => {
@@ -104,13 +126,23 @@ async function startControlWorker() {
   });
 
   if (logReconciliation) {
-    await runInitialSchedulerReconciliation(logReconciliation, shutdown.shutdown);
+    await runInitialWorkerReconciliation(logReconciliation, shutdown.shutdown);
     reconciliationTimer = setInterval(() => {
       void logReconciliation().catch((error: unknown) =>
         logger.error({ error }, 'Scheduler reconciliation failed'),
       );
     }, environment.SCHEDULER_RECONCILIATION_INTERVAL_MS);
     reconciliationTimer.unref();
+  }
+
+  if (runAccountDeletionPurge) {
+    await runInitialWorkerReconciliation(runAccountDeletionPurge, shutdown.shutdown);
+    accountDeletionTimer = setInterval(() => {
+      void runAccountDeletionPurge().catch((error: unknown) =>
+        logger.error({ error }, 'Account deletion cleanup failed'),
+      );
+    }, environment.ACCOUNT_DELETION_SWEEP_INTERVAL_MS);
+    accountDeletionTimer.unref();
   }
 
   return { connection, workers };

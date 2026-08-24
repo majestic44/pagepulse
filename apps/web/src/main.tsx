@@ -21,7 +21,7 @@ const milestones = [
   },
   {
     detail:
-      'Owner bootstrap, password sign-in, authenticator-app MFA, active sessions and member lifecycle controls are in place.',
+      'Owner bootstrap, password sign-in, authenticator-app MFA, sessions, member lifecycle and recoverable deletion are in place.',
     label: 'Phase 2',
     status: 'In progress',
     title: 'Identity and administration',
@@ -53,6 +53,11 @@ type TotpEnrollment = Readonly<{
 }>;
 
 type FactorAction = 'disable' | 'replace-recovery-codes' | undefined;
+
+type AccountDeletionRecovery = Readonly<{
+  deletionDeadline: string;
+  recoveryToken: string;
+}>;
 
 type ManagedMember = Readonly<{
   createdAt: string;
@@ -89,6 +94,10 @@ function AccountSessions() {
   const [factorAction, setFactorAction] = useState<FactorAction>();
   const [useRecoveryProof, setUseRecoveryProof] = useState(false);
   const [factorProof, setFactorProof] = useState('');
+  const [deletionPassword, setDeletionPassword] = useState('');
+  const [deletionProof, setDeletionProof] = useState('');
+  const [useRecoveryDeletionProof, setUseRecoveryDeletionProof] = useState(false);
+  const [deletionRecovery, setDeletionRecovery] = useState<AccountDeletionRecovery>();
 
   const loadSessions = useCallback(async () => {
     setMessage(undefined);
@@ -301,6 +310,52 @@ function AccountSessions() {
       await loadSessions();
     } catch {
       setMessage('Authenticator settings are temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function requestAccountDeletion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !window.confirm(
+        'Schedule this account for permanent deletion? You will be signed out immediately and have seven days to recover it with a one-time token.',
+      )
+    ) {
+      return;
+    }
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/account/deletion', {
+        body: JSON.stringify({
+          password: deletionPassword,
+          ...(state.kind === 'ready' && state.totpEnabled
+            ? useRecoveryDeletionProof
+              ? { recoveryCode: deletionProof }
+              : { code: deletionProof }
+            : {}),
+        }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 401) {
+        setMessage('Your deletion confirmation was not accepted.');
+        return;
+      }
+      if (response.status === 409) {
+        setMessage('This account cannot be scheduled for deletion.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to schedule account deletion');
+      }
+      setDeletionRecovery((await response.json()) as AccountDeletionRecovery);
+      setDeletionPassword('');
+      setDeletionProof('');
+    } catch {
+      setMessage('Account deletion is temporarily unavailable. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -578,6 +633,77 @@ function AccountSessions() {
           </div>
         )}
       </section>
+      <section className="deletion-panel" aria-labelledby="deletion-title">
+        <p className="eyebrow">ACCOUNT DELETION</p>
+        <h2 id="deletion-title">Schedule account deletion</h2>
+        {deletionRecovery ? (
+          <div className="recovery-code-panel">
+            <h3>Save this deletion recovery token now</h3>
+            <p>
+              Your account will be permanently deleted after{' '}
+              {formatDate(deletionRecovery.deletionDeadline)}. This token is shown once and is the
+              only way to cancel before then.
+            </p>
+            <p className="manual-key">
+              Recovery token: <code>{deletionRecovery.recoveryToken}</code>
+            </p>
+            <a className="account-link inline-link" href="/account/deletion/recover">
+              Recover a scheduled account deletion
+            </a>
+          </div>
+        ) : (
+          <form className="sign-in-form" onSubmit={(event) => void requestAccountDeletion(event)}>
+            <p>
+              This is available for member accounts only. It ends every active session now, then
+              permanently removes the account and its data after seven days unless you recover it.
+            </p>
+            <label>
+              Current password
+              <input
+                autoComplete="current-password"
+                disabled={submitting}
+                minLength={12}
+                onChange={(event) => setDeletionPassword(event.target.value)}
+                required
+                type="password"
+                value={deletionPassword}
+              />
+            </label>
+            {state.totpEnabled ? (
+              <>
+                <label>
+                  {useRecoveryDeletionProof ? 'Recovery code' : 'Authenticator code'}
+                  <input
+                    autoComplete="one-time-code"
+                    disabled={submitting}
+                    inputMode={useRecoveryDeletionProof ? 'text' : 'numeric'}
+                    onChange={(event) => setDeletionProof(event.target.value)}
+                    pattern={useRecoveryDeletionProof ? '[A-Za-z0-9 -]+' : '\\d{6}'}
+                    required
+                    value={deletionProof}
+                  />
+                </label>
+                <button
+                  className="text-button"
+                  disabled={submitting}
+                  onClick={() => {
+                    setDeletionProof('');
+                    setUseRecoveryDeletionProof((value) => !value);
+                  }}
+                  type="button"
+                >
+                  {useRecoveryDeletionProof
+                    ? 'Use authenticator code instead'
+                    : 'Use a recovery code instead'}
+                </button>
+              </>
+            ) : null}
+            <button className="danger-button" disabled={submitting} type="submit">
+              {submitting ? 'Scheduling deletion…' : 'Schedule account deletion'}
+            </button>
+          </form>
+        )}
+      </section>
       <p aria-live="polite" className="form-message" role="status">
         {message}
       </p>
@@ -759,6 +885,77 @@ function OwnerMembers() {
   );
 }
 
+function AccountDeletionRecovery() {
+  const [token, setToken] = useState('');
+  const [message, setMessage] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+
+  async function recoverAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/account/deletion/recover', {
+        body: JSON.stringify({ token }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 401) {
+        setMessage('That deletion recovery token is invalid, expired, or has already been used.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to recover account deletion');
+      }
+      setToken('');
+      setMessage('Your account deletion was cancelled. You can now sign in again.');
+    } catch {
+      setMessage('Account recovery is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">ACCOUNT DELETION RECOVERY</p>
+      <h1>Cancel a scheduled account deletion</h1>
+      <p className="account-intro">
+        Enter the one-time recovery token shown when deletion was scheduled. A successful recovery
+        restores the account, but you will need to sign in again.
+      </p>
+      <form className="sign-in-form" onSubmit={(event) => void recoverAccount(event)}>
+        <label>
+          Deletion recovery token
+          <input
+            autoComplete="off"
+            disabled={submitting}
+            maxLength={43}
+            minLength={43}
+            onChange={(event) => setToken(event.target.value)}
+            pattern="[A-Za-z0-9_-]{43}"
+            required
+            value={token}
+          />
+        </label>
+        <button disabled={submitting} type="submit">
+          {submitting ? 'Recovering…' : 'Cancel account deletion'}
+        </button>
+      </form>
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+      <a className="account-link inline-link" href="/account/sessions">
+        Go to Account security
+      </a>
+    </main>
+  );
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem('pagepulse-theme') as Theme | null) ?? 'light',
@@ -779,6 +976,9 @@ function App() {
         <a className="account-link" href="/owner/members">
           Member administration
         </a>
+        <a className="account-link" href="/account/deletion/recover">
+          Recover deletion
+        </a>
         <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
           Use {theme === 'light' ? 'dark' : 'light'} theme
         </button>
@@ -793,8 +993,8 @@ function App() {
         </p>
         <p className="status-note">
           Verification and password-reset delivery are deliberately deferred until the notification
-          platform is ready. Authenticator-app MFA, active-session and owner member controls are now
-          available; monitoring screens follow.
+          platform is ready. Authenticator-app MFA, session, member lifecycle and recoverable
+          deletion controls are now available; monitoring screens follow.
         </p>
       </section>
 
@@ -821,7 +1021,7 @@ function App() {
         <p className="eyebrow">UP NEXT</p>
         <h2 id="next-title">Finish identity, then begin monitor configuration.</h2>
         <p>
-          Account recovery and audit history are the remaining identity work. Monitor creation and
+          Security and admin audit history is the remaining identity work. Monitor creation and
           page-change detection begin in Phase 3 once those access controls are complete.
         </p>
       </section>
@@ -832,9 +1032,11 @@ function App() {
 const Page =
   window.location.pathname === '/account/sessions'
     ? AccountSessions
-    : window.location.pathname === '/owner/members'
-      ? OwnerMembers
-      : App;
+    : window.location.pathname === '/account/deletion/recover'
+      ? AccountDeletionRecovery
+      : window.location.pathname === '/owner/members'
+        ? OwnerMembers
+        : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

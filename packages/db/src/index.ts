@@ -1,4 +1,5 @@
 export * from './auth.js';
+export * from './account-deletion.js';
 export * from './client.js';
 export * from './health.js';
 export * from './migrate.js';

@@ -2,20 +2,20 @@
 
 ## Service topology
 
-| Service               | Responsibility                                                | Publicly exposed     |
-| --------------------- | ------------------------------------------------------------- | -------------------- |
-| `gateway`             | Static web app, `/api` proxy, security headers                | Tunnel network only  |
-| `api`                 | Auth, REST/OpenAPI, monitor configuration, admin and PAT API  | Through gateway      |
-| `scheduler`           | Reconciles authoritative schedules into BullMQ Job Schedulers | No                   |
-| `fetch-worker`        | HTTP HTML/JSON/RSS fetching and extraction                    | No                   |
-| `browser-worker`      | Isolated Chromium rendering, login and visual selection       | No                   |
-| `change-worker`       | Normalization, identity, comparison and event creation        | No                   |
-| `notification-worker` | Immediate/digest/push/webhook delivery                        | No                   |
-| `maintenance-worker`  | Retention, recovery, stale-state and cleanup jobs             | No                   |
-| `migrate`             | One-shot, locked Drizzle migrations                           | No                   |
-| `mariadb`             | Authoritative durable application state                       | No host port         |
-| `redis`               | BullMQ jobs, locks, rate-limit and ephemeral coordination     | No host port         |
-| `cloudflared`         | Sole production ingress                                       | Outbound tunnel only |
+| Service               | Responsibility                                                    | Publicly exposed     |
+| --------------------- | ----------------------------------------------------------------- | -------------------- |
+| `gateway`             | Static web app, `/api` proxy, security headers                    | Tunnel network only  |
+| `api`                 | Auth, REST/OpenAPI, monitor configuration, admin and PAT API      | Through gateway      |
+| `scheduler`           | Reconciles authoritative schedules into BullMQ Job Schedulers     | No                   |
+| `fetch-worker`        | HTTP HTML/JSON/RSS fetching and extraction                        | No                   |
+| `browser-worker`      | Isolated Chromium rendering, login and visual selection           | No                   |
+| `change-worker`       | Normalization, identity, comparison and event creation            | No                   |
+| `notification-worker` | Immediate/digest/push/webhook delivery                            | No                   |
+| `maintenance-worker`  | Retention, deletion recovery expiry, stale-state and cleanup jobs | No                   |
+| `migrate`             | One-shot, locked Drizzle migrations                               | No                   |
+| `mariadb`             | Authoritative durable application state                           | No host port         |
+| `redis`               | BullMQ jobs, locks, rate-limit and ephemeral coordination         | No host port         |
+| `cloudflared`         | Sole production ingress                                           | Outbound tunnel only |
 
 Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, and fake changing targets.
 
@@ -52,6 +52,8 @@ Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, 
 - Workers stop claiming jobs before their Redis connection is closed, allowing BullMQ to finish active jobs during `SIGTERM`/`SIGINT` shutdown.
 - Transactional outbox rows bridge MariaDB commits to BullMQ. A publisher marks a row published only after BullMQ accepts its deterministic notification job ID, so a crash can cause an at-least-once retry but cannot lose a committed event; notification consumers must remain idempotent.
 - Scheduler reconciliation reads active, revision-matching `monitor_schedules` rows from MariaDB and upserts their deterministic BullMQ Job Schedulers. It removes only stale schedulers with the PagePulse-owned key prefix, repairing Redis after restart or data loss without deleting unrelated jobs.
+- The maintenance worker performs an immediate and then periodic MariaDB transaction that permanently deletes expired
+  `deleting` member accounts. The `users.deletion_deadline` index drives selection; Redis is not part of deletion authority.
 - File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
 
 ## Queue contracts

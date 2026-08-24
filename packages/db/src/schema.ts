@@ -8,19 +8,25 @@ import {
   varchar,
 } from 'drizzle-orm/mysql-core';
 
-export const users = mysqlTable('users', {
-  id: varchar('id', { length: 36 }).primaryKey(),
-  email: varchar('email', { length: 320 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 512 }),
-  emailVerifiedAt: timestamp('email_verified_at'),
-  passwordChangedAt: timestamp('password_changed_at'),
-  role: mysqlEnum('role', ['owner', 'member']).notNull().default('member'),
-  status: mysqlEnum('status', ['invited', 'active', 'suspended', 'deleting'])
-    .notNull()
-    .default('invited'),
-  monitorLimit: int('monitor_limit').notNull().default(50),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+export const users = mysqlTable(
+  'users',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    email: varchar('email', { length: 320 }).notNull().unique(),
+    passwordHash: varchar('password_hash', { length: 512 }),
+    emailVerifiedAt: timestamp('email_verified_at'),
+    passwordChangedAt: timestamp('password_changed_at'),
+    role: mysqlEnum('role', ['owner', 'member']).notNull().default('member'),
+    status: mysqlEnum('status', ['invited', 'active', 'suspended', 'deleting'])
+      .notNull()
+      .default('invited'),
+    deletionRequestedAt: timestamp('deletion_requested_at'),
+    deletionDeadline: timestamp('deletion_deadline'),
+    monitorLimit: int('monitor_limit').notNull().default(50),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('users_deletion_deadline_idx').on(table.status, table.deletionDeadline)],
+);
 
 export const ownerSetupTokens = mysqlTable(
   'owner_setup_tokens',
@@ -71,7 +77,11 @@ export const accountTokens = mysqlTable(
     userId: varchar('user_id', { length: 36 })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    type: mysqlEnum('type', ['email_verification', 'password_reset']).notNull(),
+    type: mysqlEnum('type', [
+      'email_verification',
+      'password_reset',
+      'account_deletion_recovery',
+    ]).notNull(),
     tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
     expiresAt: timestamp('expires_at').notNull(),
     usedAt: timestamp('used_at'),

@@ -11,6 +11,8 @@ import {
 } from '@pagepulse/auth';
 import { createLogger, loadEnvironment, type Environment } from '@pagepulse/config';
 import {
+  AccountDeletionStateError,
+  AccountDeletionTokenError,
   AuthenticationStateError,
   AuthenticationTokenError,
   createDatabasePool,
@@ -20,6 +22,10 @@ import {
   type ActiveSession,
 } from '@pagepulse/db';
 import {
+  AccountDeletionConflictResponse,
+  AccountDeletionRecoveryRequest,
+  AccountDeletionScheduledResponse,
+  AccountDeletionRequest,
   ActiveSessionsResponse,
   AuthenticationAcceptedResponse,
   AuthenticationUnavailableResponse,
@@ -28,6 +34,7 @@ import {
   ForbiddenResponse,
   HealthResponse,
   InvalidAuthenticationRequestResponse,
+  InvalidAccountDeletionConfirmationResponse,
   LoginRequest,
   ManagedMembersResponse,
   MemberIdParameters,
@@ -46,6 +53,7 @@ import {
   VersionResponse,
 } from '@pagepulse/contracts';
 import { createRedisConnection, probeRedis } from '@pagepulse/queue';
+import { createAccountDeletionService } from './account-deletion.js';
 import {
   createAuthenticationService,
   type AuthenticationDependencies,
@@ -85,6 +93,10 @@ function authenticationRateLimitPolicies(
   environment: Environment,
 ): AuthenticationRateLimitPolicies {
   return {
+    deletion: {
+      limit: environment.AUTH_DELETION_RATE_LIMIT_MAX,
+      windowMs: environment.AUTH_DELETION_RATE_LIMIT_WINDOW_MS,
+    },
     login: {
       limit: environment.AUTH_LOGIN_RATE_LIMIT_MAX,
       windowMs: environment.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
@@ -121,6 +133,7 @@ async function createDefaultAuthenticationDependencies(
       pool,
     });
     return {
+      accountDeletion: createAccountDeletionService({ pool }),
       close: async () => {
         await Promise.allSettled([pool.end(), redis.quit()]);
       },
@@ -296,6 +309,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
   }
 
   const invalidAuthenticationResponse = { error: 'Invalid authentication request' } as const;
+  const invalidAccountDeletionConfirmationResponse = {
+    error: 'Invalid account deletion confirmation',
+  } as const;
   const isInvalidAuthenticationRequest = (error: unknown) =>
     error instanceof AuthenticationTokenError ||
     error instanceof AuthenticationStateError ||
@@ -792,6 +808,100 @@ export async function buildApp(options: BuildAppOptions = {}) {
           error instanceof AuthenticationTokenError ||
           error instanceof AuthenticationStateError
         ) {
+          return reply.code(401).send({ error: 'Unauthorized' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Body: { code?: string; password: string; recoveryCode?: string } }>(
+    '/api/v1/account/deletion',
+    {
+      schema: {
+        body: AccountDeletionRequest,
+        response: {
+          200: AccountDeletionScheduledResponse,
+          401: Type.Union([UnauthorizedResponse, InvalidAccountDeletionConfirmationResponse]),
+          409: AccountDeletionConflictResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('deletion', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        if (
+          !(await current.authentication.service.verifyCurrentPassword(
+            current.session.userId,
+            request.body.password,
+          ))
+        ) {
+          return reply.code(401).send(invalidAccountDeletionConfirmationResponse);
+        }
+        const factorEnabled = await current.authentication.totp.isEnabled(current.session.userId);
+        if (factorEnabled) {
+          const proof =
+            request.body.code !== undefined
+              ? { code: request.body.code }
+              : request.body.recoveryCode !== undefined
+                ? { recoveryCode: request.body.recoveryCode }
+                : {};
+          await current.authentication.totp.verify(current.session.userId, proof);
+        } else if (request.body.code !== undefined || request.body.recoveryCode !== undefined) {
+          return reply.code(401).send(invalidAccountDeletionConfirmationResponse);
+        }
+        const deletion = await current.authentication.accountDeletion.request(
+          current.session.userId,
+        );
+        reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
+        return {
+          deletionDeadline: deletion.deadline.toISOString(),
+          recoveryToken: deletion.token,
+        };
+      } catch (error) {
+        if (error instanceof AuthenticationTokenError) {
+          return reply.code(401).send(invalidAccountDeletionConfirmationResponse);
+        }
+        if (error instanceof AccountDeletionStateError) {
+          return reply.code(409).send({ error: 'Account deletion cannot be completed' });
+        }
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Body: { token: string } }>(
+    '/api/v1/account/deletion/recover',
+    {
+      schema: {
+        body: AccountDeletionRecoveryRequest,
+        response: {
+          204: Type.Null(),
+          401: UnauthorizedResponse,
+          429: TooManyRequestsResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const authentication = await getRateLimitedAuthentication('deletion', request.ip, reply);
+      if (!authentication) {
+        return reply;
+      }
+      try {
+        await authentication.accountDeletion.recover(request.body.token);
+        return reply.code(204).send();
+      } catch (error) {
+        if (error instanceof AccountDeletionTokenError) {
           return reply.code(401).send({ error: 'Unauthorized' });
         }
         return reply.code(503).send({ error: 'Authentication temporarily unavailable' });

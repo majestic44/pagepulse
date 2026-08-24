@@ -21,7 +21,7 @@ Untrusted inputs include target URLs, fetched pages, redirects, JSON/RSS content
   HTTP-only and `SameSite=Strict`; production cookies are also `Secure`. Successful login replaces the prior browser
   session, password reset revokes all sessions, and members can revoke individual or all other active sessions.
   Sessions expire after eight idle hours and always within 30 days by default; both bounds are validated configuration.
-- Rate limits for sign-in, reset, invitation, TOTP and PAT operations.
+- Rate limits for sign-in, reset, invitation, TOTP, account deletion/recovery and PAT operations.
 - Login, redemption/verification and reset rate-limit keys contain only a SHA-256 hash of the requester IP. Redis
   rate-limit errors fail closed with a generic temporary-unavailable response; plaintext IP addresses are not stored
   in the key or logged.
@@ -78,8 +78,11 @@ token remains configured.
 
 Owners can suspend active members only, which revokes every active browser session immediately. Reactivation restores
 the previous active state. Owner removal is limited to member accounts, revokes sessions before deletion, and relies
-on foreign keys to remove member-owned account records. The following Phase 2 item adds the retained audit trail for
-these lifecycle actions.
+on foreign keys to remove member-owned account records. Self-service deletion is also member-only: it requires the
+current password and a fresh TOTP proof when enabled, revokes every session, and stores only a SHA-256 digest of its
+one-time recovery token. Recovery is unauthenticated but rate-limited, returns no account details, and works only
+before the MariaDB deletion deadline. The maintenance worker deletes expired member records in bounded transactions.
+The remaining Phase 2 item adds the retained audit trail for these lifecycle actions.
 
 ## Security gates
 

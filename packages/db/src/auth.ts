@@ -6,6 +6,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { revokeSessionsForUser } from './sessions.js';
 
 export const AccountTokenTypes = Object.freeze({
+  accountDeletionRecovery: 'account_deletion_recovery',
   emailVerification: 'email_verification',
   passwordReset: 'password_reset',
 });
@@ -275,6 +276,35 @@ export async function findAuthenticationUser(connection: AuthConnection, email: 
     `SELECT id, email, password_hash AS passwordHash, email_verified_at AS emailVerifiedAt, role, status
      FROM users WHERE email = ? LIMIT 1`,
     [normalizeEmail(email)],
+  );
+  const row = rows[0];
+  if (!row) {
+    return undefined;
+  }
+  const record = asRecord(row);
+  const role = readString(record, 'role');
+  const status = readString(record, 'status');
+  if (
+    (role !== 'owner' && role !== 'member') ||
+    !['active', 'deleting', 'invited', 'suspended'].includes(status)
+  ) {
+    throw new AuthenticationDataError('user role or status is invalid');
+  }
+  return {
+    email: normalizeEmail(readString(record, 'email')),
+    emailVerified: readNullableDate(record, 'emailVerifiedAt') !== null,
+    id: readString(record, 'id'),
+    passwordHash: readNullableString(record, 'passwordHash'),
+    role,
+    status,
+  } as AuthenticationUser;
+}
+
+export async function findAuthenticationUserById(connection: AuthConnection, userId: string) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT id, email, password_hash AS passwordHash, email_verified_at AS emailVerifiedAt, role, status
+     FROM users WHERE id = ? LIMIT 1`,
+    [userId],
   );
   const row = rows[0];
   if (!row) {

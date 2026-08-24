@@ -93,6 +93,15 @@ manual key only to the active browser response. Recovery codes are displayed onc
 outside PagePulse. TOTP proof, enrollment confirmation, recovery-code replacement, and factor disablement share the
 bounded `AUTH_TOTP_RATE_LIMIT_MAX` / `AUTH_TOTP_RATE_LIMIT_WINDOW_MS` policy.
 
+## Account deletion recovery
+
+`POST /api/v1/account/deletion` is available to active member browser sessions only. It requires the current password
+and a fresh TOTP proof when a factor is enabled, revokes every session, and displays one opaque recovery token exactly
+once. Save that token outside PagePulse; it is not logged, queued, or persisted in plaintext. Submit it to
+`POST /api/v1/account/deletion/recover` within seven days to restore the account, then sign in again. The maintenance
+worker performs an immediate cleanup at startup and repeats it every `ACCOUNT_DELETION_SWEEP_INTERVAL_MS` (one hour by
+default), permanently deleting expired member accounts according to MariaDB's authoritative deadline.
+
 ## Codex workflow
 
 Give Codex one implementation-plan issue at a time. Ask it to inspect this documentation and `AGENTS.md`, create a feature branch from `development`, implement tests and docs, validate locally, and open a PR. Do not combine authentication, browser isolation and notification delivery in one oversized change.

@@ -20,7 +20,7 @@ export type SchedulerReconciliationRun = Readonly<{
   schedules: SchedulerReconciliationResult;
 }>;
 
-export async function runInitialSchedulerReconciliation(
+export async function runInitialWorkerReconciliation(
   reconcile: () => Promise<void>,
   shutdown: (signal: string) => Promise<void>,
 ) {
