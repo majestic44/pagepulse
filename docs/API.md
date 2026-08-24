@@ -121,6 +121,27 @@ They contain no email addresses, tokens, credentials, request bodies, private fe
 omits requester-IP hashes, request IDs and retention deadlines; it exposes only safe actor/target IDs, action names
 and timestamps. MariaDB retention cleanup removes expired events in bounded batches with the maintenance worker.
 
+## Monitor configuration foundation
+
+The first monitor configuration routes are available to every active, verified browser session and always scope records
+to that session's user ID. A caller cannot read or mutate another account's monitor by supplying its ID.
+
+- `GET /api/v1/monitors` lists the signed-in account's monitor configurations.
+- `POST /api/v1/monitors` creates one configuration with a name and HTTP(S) URL. Creation locks the active account row
+  before counting its existing monitors, so concurrent creates cannot exceed the account's MariaDB-backed monitor limit
+  (50 by default).
+- `GET /api/v1/monitors/{monitorId}` reads one owned configuration.
+- `PUT /api/v1/monitors/{monitorId}`, `POST /api/v1/monitors/{monitorId}/pause`,
+  `POST /api/v1/monitors/{monitorId}/resume`, and `DELETE /api/v1/monitors/{monitorId}` require an
+  `If-Match: "<revision>"` precondition. Reads and successful writes emit the latest revision as an `ETag`.
+  Stale updates return `409 { "error": "Monitor has changed" }` rather than overwriting a newer configuration.
+- Pause is valid only from `active`; resume is valid only from `paused`. Each successful mutation increments the
+  monitor revision, making any prior scheduling record stale until Phase 3 scheduling is implemented.
+
+Names are trimmed and bounded, and URLs must be absolute HTTP(S) values without embedded credentials or fragments.
+These routes store configuration only; they do not fetch the target. DNS resolution, private-network rejection,
+redirect handling, response limits, and all outbound-request enforcement are delivered by Phase 4's SSRF-safe fetcher.
+
 Outbound email delivery is deliberately deferred to Phase 5. Verification and password-reset flows store only token
 hashes and do not return a recoverable plaintext token. Account deletion is the narrowly scoped exception: its recovery
 token is displayed once to the already authenticated account holder, never logged or queued, and is stored only as a

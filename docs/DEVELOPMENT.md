@@ -19,6 +19,10 @@ mounts through `<VARIABLE>_FILE` (for example, `DATABASE_URL_FILE=/run/secrets/d
 the direct value and its `_FILE` form. Logs are structured JSON and redact sensitive keys recursively.
 
 The scheduler reconciles MariaDB-backed monitor schedules and pending outbox rows every five minutes by default.
+
+After signing in locally, visit `http://localhost:8080/monitors` to exercise monitor configuration. The page supports
+creation, revision-protected edits, pause/resume, and deletion for the signed-in account. It records target URLs but
+does not fetch them; outbound SSRF protections arrive with the HTTP monitoring engine.
 Set `SCHEDULER_RECONCILIATION_INTERVAL_MS` to a value between 60 seconds and one hour when a different recovery
 cadence is needed.
 

@@ -30,6 +30,7 @@ import type { SessionService } from './session.js';
 import type { AccountDeletionService } from './account-deletion.js';
 import type { AuditService } from './audit.js';
 import type { MemberService } from './members.js';
+import type { MonitorService } from './monitors.js';
 import type { TotpService } from './totp.js';
 import type { VerificationEmailDelivery } from './email-delivery.js';
 
@@ -269,6 +270,7 @@ export type AuthenticationDependencies = Readonly<{
   audit: AuditService;
   emailDelivery: VerificationEmailDelivery;
   members: MemberService;
+  monitors: MonitorService;
   rateLimitPolicies: AuthenticationRateLimitPolicies;
   rateLimitStore: RateLimitStore;
   service: AuthenticationService;

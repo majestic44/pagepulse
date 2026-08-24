@@ -4,8 +4,10 @@ import { loadEnvironment } from '@pagepulse/config';
 import {
   AccountDeletionTokenError,
   MemberLifecycleStateError,
+  MonitorRevisionConflictError,
   type ActiveSession,
   type AuthenticationUser,
+  type Monitor,
 } from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
 import type { AccountDeletionService } from './account-deletion.js';
@@ -14,6 +16,7 @@ import type { VerificationEmailDelivery } from './email-delivery.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
 import type { MemberService } from './members.js';
+import type { MonitorService } from './monitors.js';
 import type { SessionService } from './session.js';
 import type { TotpService } from './totp.js';
 
@@ -31,6 +34,7 @@ function createAuthenticationDependencies(
   accountDeletion: Partial<AccountDeletionService> = {},
   emailDelivery: Partial<VerificationEmailDelivery> = {},
   audit: Partial<AuditService> = {},
+  monitors: Partial<MonitorService> = {},
 ): AuthenticationDependencies {
   return {
     accountDeletion: {
@@ -52,6 +56,16 @@ function createAuthenticationDependencies(
       remove: vi.fn().mockResolvedValue(undefined),
       suspend: vi.fn().mockResolvedValue(undefined),
       ...members,
+    },
+    monitors: {
+      create: vi.fn().mockResolvedValue(monitor),
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue(monitor),
+      list: vi.fn().mockResolvedValue([monitor]),
+      pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
+      resume: vi.fn().mockResolvedValue(monitor),
+      update: vi.fn().mockResolvedValue({ ...monitor, name: 'Updated monitor', revision: 2 }),
+      ...monitors,
     },
     emailDelivery: {
       enabled: true,
@@ -148,6 +162,15 @@ const memberSession: ActiveSession = {
   email: 'member@example.test',
   role: 'member',
   userId: 'member-id',
+};
+
+const monitor: Monitor = {
+  createdAt: new Date('2026-08-24T00:00:00.000Z'),
+  id: 'monitor-id',
+  name: 'Career openings',
+  revision: 1,
+  state: 'active',
+  url: 'https://example.test/jobs',
 };
 
 const localAuditIpHash = '12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0';
@@ -732,6 +755,142 @@ describe('authentication contract', () => {
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ error: 'Unauthorized' });
     expect(response.body).not.toContain('recovery token is invalid');
+  });
+
+  it('allows a member to create, revise, pause, resume, and delete only their own monitors', async () => {
+    const created = { ...monitor, revision: 1 };
+    const updated = { ...monitor, name: 'Updated monitor', revision: 2 };
+    const paused = { ...updated, revision: 3, state: 'paused' as const };
+    const resumed = { ...updated, revision: 4, state: 'active' as const };
+    const monitors: Partial<MonitorService> = {
+      create: vi.fn().mockResolvedValue(created),
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue(created),
+      list: vi.fn().mockResolvedValue([created]),
+      pause: vi.fn().mockResolvedValue(paused),
+      resume: vi.fn().mockResolvedValue(resumed),
+      update: vi.fn().mockResolvedValue(updated),
+    };
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      monitors,
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const listed = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/monitors',
+      headers: { cookie },
+    });
+    const createdResponse = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors',
+      headers: { cookie },
+      payload: { name: 'Career openings', url: 'https://example.test/jobs' },
+    });
+    const fetched = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/monitors/monitor-id',
+      headers: { cookie },
+    });
+    const changed = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id',
+      headers: { cookie, 'if-match': '"1"' },
+      payload: { name: 'Updated monitor', url: 'https://example.test/jobs' },
+    });
+    const pausedResponse = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors/monitor-id/pause',
+      headers: { cookie, 'if-match': '"2"' },
+    });
+    const resumedResponse = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors/monitor-id/resume',
+      headers: { cookie, 'if-match': '"3"' },
+    });
+    const deleted = await testApp.inject({
+      method: 'DELETE',
+      url: '/api/v1/monitors/monitor-id',
+      headers: { cookie, 'if-match': '"4"' },
+    });
+
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers['cache-control']).toBe('no-store');
+    expect(listed.json()).toEqual({
+      monitors: [expect.objectContaining({ id: 'monitor-id', revision: 1 })],
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    expect(createdResponse.headers.etag).toBe('"1"');
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.headers.etag).toBe('"1"');
+    expect(changed.statusCode).toBe(200);
+    expect(changed.headers.etag).toBe('"2"');
+    expect(pausedResponse.json()).toMatchObject({ revision: 3, state: 'paused' });
+    expect(resumedResponse.json()).toMatchObject({ revision: 4, state: 'active' });
+    expect(deleted.statusCode).toBe(204);
+    expect(authentication.monitors.create).toHaveBeenCalledWith('member-id', {
+      name: 'Career openings',
+      url: 'https://example.test/jobs',
+    });
+    expect(authentication.monitors.update).toHaveBeenCalledWith('member-id', 'monitor-id', 1, {
+      name: 'Updated monitor',
+      url: 'https://example.test/jobs',
+    });
+    expect(authentication.monitors.pause).toHaveBeenCalledWith('member-id', 'monitor-id', 2);
+    expect(authentication.monitors.resume).toHaveBeenCalledWith('member-id', 'monitor-id', 3);
+    expect(authentication.monitors.delete).toHaveBeenCalledWith('member-id', 'monitor-id', 4);
+  });
+
+  it('rejects missing and stale monitor revisions without exposing monitor data', async () => {
+    const monitors: Partial<MonitorService> = {
+      update: vi.fn().mockRejectedValue(new MonitorRevisionConflictError()),
+    };
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      monitors,
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const payload = { name: 'Career openings', url: 'https://example.test/jobs' };
+
+    const missing = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      payload,
+    });
+    const stale = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id',
+      headers: {
+        cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'if-match': '"1"',
+      },
+      payload,
+    });
+
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json()).toEqual({ error: 'Invalid monitor request' });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toEqual({ error: 'Monitor has changed' });
+    expect(authentication.monitors.update).toHaveBeenCalledTimes(1);
   });
 
   it('allows an owner to list and manage member lifecycle state', async () => {
