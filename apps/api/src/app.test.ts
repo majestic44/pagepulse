@@ -9,6 +9,7 @@ import {
 } from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
 import type { AccountDeletionService } from './account-deletion.js';
+import type { VerificationEmailDelivery } from './email-delivery.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
 import type { MemberService } from './members.js';
@@ -27,6 +28,7 @@ function createAuthenticationDependencies(
   totp: Partial<TotpService> = {},
   members: Partial<MemberService> = {},
   accountDeletion: Partial<AccountDeletionService> = {},
+  emailDelivery: Partial<VerificationEmailDelivery> = {},
 ): AuthenticationDependencies {
   return {
     accountDeletion: {
@@ -45,6 +47,11 @@ function createAuthenticationDependencies(
       suspend: vi.fn().mockResolvedValue(undefined),
       ...members,
     },
+    emailDelivery: {
+      enabled: true,
+      sendVerification: vi.fn().mockResolvedValue(undefined),
+      ...emailDelivery,
+    },
     rateLimitPolicies: {
       deletion: { limit: 3, windowMs: 60_000 },
       login: { limit: 5, windowMs: 60_000 },
@@ -58,14 +65,17 @@ function createAuthenticationDependencies(
       confirmEmailVerification: vi.fn().mockResolvedValue(undefined),
       login: vi.fn().mockResolvedValue(undefined),
       redeemInvitation: vi.fn().mockResolvedValue({
+        email: 'member@example.test',
         expiresAt: new Date('2026-08-24T00:00:00.000Z'),
         token: 'verification-token-must-not-be-returned',
       }),
       redeemOwnerSetup: vi.fn().mockResolvedValue({
+        email: 'owner@example.test',
         expiresAt: new Date('2026-08-24T00:00:00.000Z'),
         token: 'verification-token-must-not-be-returned',
       }),
       requestPasswordReset: vi.fn().mockResolvedValue(undefined),
+      requestEmailVerification: vi.fn().mockResolvedValue(undefined),
       verifyCurrentPassword: vi.fn().mockResolvedValue(false),
       ...service,
     },
@@ -291,6 +301,94 @@ describe('authentication contract', () => {
       'owner-setup-token',
       'a secure password',
     );
+    expect(authentication.emailDelivery.sendVerification).toHaveBeenCalledWith({
+      email: 'owner@example.test',
+      expiresAt: new Date('2026-08-24T00:00:00.000Z'),
+      token: 'verification-token-must-not-be-returned',
+    });
+  });
+
+  it('does not consume an owner setup token when verification delivery is disabled', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        enabled: false,
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/owner-setup',
+      payload: { password: 'a secure password', token: 'owner-setup-token' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Authentication temporarily unavailable' });
+    expect(authentication.service.redeemOwnerSetup).not.toHaveBeenCalled();
+  });
+
+  it('resends verification mail without revealing whether an account is eligible', async () => {
+    const authentication = createAuthenticationDependencies({
+      requestEmailVerification: vi.fn().mockResolvedValue({
+        email: 'owner@example.test',
+        expiresAt: new Date('2026-08-24T00:00:00.000Z'),
+        token: 'replacement-verification-token',
+      }),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email-verifications/resend',
+      payload: { email: 'owner@example.test' },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ status: 'verification_required' });
+    expect(response.body).not.toContain('replacement-verification-token');
+    expect(authentication.emailDelivery.sendVerification).toHaveBeenCalledWith({
+      email: 'owner@example.test',
+      expiresAt: new Date('2026-08-24T00:00:00.000Z'),
+      token: 'replacement-verification-token',
+    });
+  });
+
+  it('returns unavailable when a verification message cannot be delivered', async () => {
+    const authentication = createAuthenticationDependencies(
+      {
+        requestEmailVerification: vi.fn().mockResolvedValue({
+          email: 'owner@example.test',
+          expiresAt: new Date('2026-08-24T00:00:00.000Z'),
+          token: 'replacement-verification-token',
+        }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { sendVerification: vi.fn().mockRejectedValue(new Error('Mailpit unavailable')) },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/auth/email-verifications/resend',
+      payload: { email: 'owner@example.test' },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'Authentication temporarily unavailable' });
+    expect(response.body).not.toContain('Mailpit unavailable');
   });
 
   it('returns a generic response for password reset requests', async () => {

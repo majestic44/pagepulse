@@ -51,10 +51,14 @@ The following unauthenticated endpoints are implemented for the invitation-only 
 validated against the `@pagepulse/contracts` schemas, and responses never contain an account, verification, or reset
 token.
 
-- `POST /api/v1/auth/owner-setup` accepts `{ token, password }`, consumes the CLI-issued setup token and returns
-  `202 { "status": "verification_required" }`.
-- `POST /api/v1/auth/invitations/redeem` accepts `{ token, password }` and returns the same `202` response.
+- `POST /api/v1/auth/owner-setup` accepts `{ token, password }`, consumes the CLI-issued setup token, sends a
+  verification message through the enabled delivery adapter and returns `202 { "status": "verification_required" }`.
+- `POST /api/v1/auth/invitations/redeem` accepts `{ token, password }`, sends the same verification message and
+  returns the same `202` response.
 - `POST /api/v1/auth/email-verifications/confirm` accepts `{ token }` and returns `204` when it activates the account.
+- `POST /api/v1/auth/email-verifications/resend` accepts `{ email }` and always returns
+  `202 { "status": "verification_required" }` when delivery is enabled, without revealing whether the address is
+  eligible. It issues a replacement only for a password-configured, invited account.
 - `POST /api/v1/auth/login` accepts `{ email, password }`. It returns `204` only when the account has no TOTP factor;
   otherwise it returns `202 { "status": "totp_required" }` and sets a five-minute, host-only, HTTP-only,
   `SameSite=Strict` challenge cookie (also `Secure` in production). Neither path exposes an opaque token.

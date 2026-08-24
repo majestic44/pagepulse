@@ -5,10 +5,13 @@ x-dev-logging: &dev-logging
     max-file: ${LOG_MAX_FILES:-5}
 
 services:
+  api:
+    environment:
+      AUTH_EMAIL_DELIVERY_MODE: mailpit
   mailpit:
     image: axllent/mailpit:v1.27.8
     restart: unless-stopped
-    networks: [app]
+    networks: [app, edge]
     ports: ['127.0.0.1:8025:8025']
     logging: *dev-logging
   adminer:

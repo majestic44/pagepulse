@@ -17,7 +17,10 @@
 | `redis`               | BullMQ jobs, locks, rate-limit and ephemeral coordination         | No host port         |
 | `cloudflared`         | Sole production ingress                                           | Outbound tunnel only |
 
-Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, and fake changing targets.
+Development-only services include Mailpit, Adminer, Bull Board, a webhook sink, and fake changing targets. The API
+uses Mailpit only when `AUTH_EMAIL_DELIVERY_MODE=mailpit` under `NODE_ENV=development`; its fixed internal SMTP
+destination is not a production email-provider configuration. Mailpit also joins the development `edge` network so
+its loopback-only web UI can be published on the host; it remains absent from production Compose.
 
 ## Service health
 

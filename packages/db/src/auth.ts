@@ -73,6 +73,10 @@ export type ResetPassword = Readonly<{
   resetTokenHash: string;
 }>;
 
+export type IssueEmailVerification = Readonly<{
+  token: IssueAccountToken;
+}>;
+
 function asRecord(value: RowDataPacket): Record<string, unknown> {
   return value;
 }
@@ -171,7 +175,7 @@ export async function redeemOwnerSetup(
   const [rows] = await connection.query<RowDataPacket[]>(
     `SELECT owner_setup_tokens.id AS tokenId, owner_setup_tokens.expires_at AS expiresAt,
       owner_setup_tokens.used_at AS usedAt, owner_setup_tokens.revoked_at AS revokedAt,
-      users.id AS userId, users.status AS status
+      users.id AS userId, users.email AS email, users.status AS status
      FROM owner_setup_tokens
      INNER JOIN users ON users.id = owner_setup_tokens.owner_id
      WHERE owner_setup_tokens.token_hash = ? LIMIT 1 FOR UPDATE`,
@@ -196,7 +200,7 @@ export async function redeemOwnerSetup(
     readString(record, 'tokenId'),
   ]);
   await issueAccountToken(connection, userId, input.verificationToken, now);
-  return { userId };
+  return { email: normalizeEmail(readString(record, 'email')), userId };
 }
 
 export async function redeemInvitation(
@@ -234,7 +238,35 @@ export async function redeemInvitation(
     readString(record, 'invitationId'),
   ]);
   await issueAccountToken(connection, userId, input.verificationToken, now);
-  return { userId };
+  return { email, userId };
+}
+
+export async function issueEmailVerification(
+  connection: AuthConnection,
+  email: string,
+  input: IssueEmailVerification,
+  now = new Date(),
+) {
+  const normalizedEmail = normalizeEmail(email);
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT id, status, password_hash AS passwordHash, email_verified_at AS emailVerifiedAt
+     FROM users WHERE email = ? LIMIT 1 FOR UPDATE`,
+    [normalizedEmail],
+  );
+  const row = rows[0];
+  if (!row) {
+    return false;
+  }
+  const record = asRecord(row);
+  if (
+    readString(record, 'status') !== 'invited' ||
+    readNullableDate(record, 'emailVerifiedAt') !== null ||
+    readNullableString(record, 'passwordHash') === null
+  ) {
+    return false;
+  }
+  await issueAccountToken(connection, readString(record, 'id'), input.token, now);
+  return true;
 }
 
 export async function verifyEmailAddress(

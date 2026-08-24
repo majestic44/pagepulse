@@ -72,6 +72,20 @@ type OwnerMembersState =
   | Readonly<{ kind: 'forbidden' | 'loading' | 'signed-out' }>
   | Readonly<{ kind: 'ready'; members: ReadonlyArray<ManagedMember> }>;
 
+const pagePath = window.location.pathname;
+const oneTimeToken =
+  pagePath === '/setup/owner' || pagePath === '/verify-email'
+    ? (new URLSearchParams(window.location.search).get('token') ?? '')
+    : '';
+
+if (oneTimeToken) {
+  window.history.replaceState(
+    window.history.state,
+    document.title,
+    `${pagePath}${window.location.hash}`,
+  );
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
@@ -956,6 +970,249 @@ function AccountDeletionRecovery() {
   );
 }
 
+function VerificationResendForm() {
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState<string>();
+  const [submitting, setSubmitting] = useState(false);
+
+  async function resendVerification(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/auth/email-verifications/resend', {
+        body: JSON.stringify({ email }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 202) {
+        setMessage('If that address is eligible, a fresh verification link has been sent.');
+        return;
+      }
+      setMessage('Verification delivery is temporarily unavailable. Please try again later.');
+    } catch {
+      setMessage('Verification delivery is temporarily unavailable. Please try again later.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const localMailpit = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+
+  return (
+    <section className="recovery-code-panel" aria-labelledby="resend-verification-title">
+      <h2 id="resend-verification-title">Need another verification link?</h2>
+      <p>
+        Enter the account email address. This form gives the same response whether or not an account
+        is eligible for verification.
+      </p>
+      <form className="sign-in-form" onSubmit={(event) => void resendVerification(event)}>
+        <label>
+          Email address
+          <input
+            autoComplete="email"
+            disabled={submitting}
+            maxLength={320}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            type="email"
+            value={email}
+          />
+        </label>
+        <button disabled={submitting} type="submit">
+          {submitting ? 'Sending…' : 'Send a new verification link'}
+        </button>
+      </form>
+      {localMailpit ? (
+        <p>
+          Local Docker development delivers mail to{' '}
+          <a href="http://127.0.0.1:8025" rel="noreferrer" target="_blank">
+            Mailpit
+          </a>
+          .
+        </p>
+      ) : null}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+    </section>
+  );
+}
+
+function OwnerSetup({ initialToken }: Readonly<{ initialToken: string }>) {
+  const [token, setToken] = useState(initialToken);
+  const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const [message, setMessage] = useState<string>();
+  const [setupComplete, setSetupComplete] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function completeOwnerSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password !== passwordConfirmation) {
+      setMessage('The password confirmation does not match.');
+      return;
+    }
+    if (!token) {
+      setMessage('This setup link is invalid, expired, or has already been used.');
+      return;
+    }
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/auth/owner-setup', {
+        body: JSON.stringify({ password, token }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 202) {
+        setPassword('');
+        setPasswordConfirmation('');
+        setSetupComplete(true);
+        setToken('');
+        setMessage('Your password is set. Check your email for a one-time verification link.');
+        return;
+      }
+      if (response.status === 400) {
+        setToken('');
+        setMessage('This setup link is invalid, expired, or has already been used.');
+        return;
+      }
+      setMessage(
+        'Owner setup is temporarily unavailable. If you already received a verification email, use that link; otherwise request a new verification link below.',
+      );
+    } catch {
+      setMessage(
+        'Owner setup is temporarily unavailable. If you already received a verification email, use that link; otherwise request a new verification link below.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">OWNER SETUP</p>
+      <h1>Secure the first owner account</h1>
+      <p className="account-intro">
+        Choose a password for the one-time owner setup link. The link has already been removed from
+        this browser address bar and is never stored by PagePulse.
+      </p>
+      {!setupComplete ? (
+        <form className="sign-in-form" onSubmit={(event) => void completeOwnerSetup(event)}>
+          <label>
+            Password
+            <input
+              autoComplete="new-password"
+              disabled={submitting || !token}
+              minLength={12}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          <label>
+            Confirm password
+            <input
+              autoComplete="new-password"
+              disabled={submitting || !token}
+              minLength={12}
+              onChange={(event) => setPasswordConfirmation(event.target.value)}
+              required
+              type="password"
+              value={passwordConfirmation}
+            />
+          </label>
+          <button disabled={submitting || !token} type="submit">
+            {submitting ? 'Setting password…' : 'Set password and send verification'}
+          </button>
+        </form>
+      ) : null}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+      <VerificationResendForm />
+    </main>
+  );
+}
+
+function EmailVerification({ initialToken }: Readonly<{ initialToken: string }>) {
+  const [token, setToken] = useState(initialToken);
+  const [message, setMessage] = useState<string>();
+  const [verified, setVerified] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function verifyEmail() {
+    if (!token) {
+      setMessage('This verification link is invalid, expired, or has already been used.');
+      return;
+    }
+    setSubmitting(true);
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/auth/email-verifications/confirm', {
+        body: JSON.stringify({ token }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 204) {
+        setToken('');
+        setVerified(true);
+        setMessage('Your email is verified. You can now sign in to PagePulse.');
+        return;
+      }
+      if (response.status === 400) {
+        setToken('');
+        setMessage('This verification link is invalid, expired, or has already been used.');
+        return;
+      }
+      setMessage('Email verification is temporarily unavailable. Please try again.');
+    } catch {
+      setMessage('Email verification is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">EMAIL VERIFICATION</p>
+      <h1>Verify your email address</h1>
+      <p className="account-intro">
+        This one-time verification link has been removed from the browser address bar before this
+        page displayed it.
+      </p>
+      {!verified ? (
+        <button disabled={submitting || !token} onClick={() => void verifyEmail()} type="button">
+          {submitting ? 'Verifying…' : 'Verify email'}
+        </button>
+      ) : null}
+      <p aria-live="polite" className="form-message" role="status">
+        {message ??
+          (!token
+            ? 'This verification link is invalid, expired, or has already been used.'
+            : undefined)}
+      </p>
+      {verified ? (
+        <a className="account-link inline-link" href="/account/sessions">
+          Go to Account security
+        </a>
+      ) : null}
+      {!verified ? <VerificationResendForm /> : null}
+    </main>
+  );
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem('pagepulse-theme') as Theme | null) ?? 'light',
@@ -992,9 +1249,10 @@ function App() {
           underway.
         </p>
         <p className="status-note">
-          Verification and password-reset delivery are deliberately deferred until the notification
-          platform is ready. Authenticator-app MFA, session, member lifecycle and recoverable
-          deletion controls are now available; monitoring screens follow.
+          Local owner onboarding now sends one-time verification links to development-only Mailpit.
+          Production verification and password-reset provider delivery remain deferred.
+          Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
+          available; monitoring screens follow.
         </p>
       </section>
 
@@ -1030,13 +1288,17 @@ function App() {
 }
 
 const Page =
-  window.location.pathname === '/account/sessions'
-    ? AccountSessions
-    : window.location.pathname === '/account/deletion/recover'
-      ? AccountDeletionRecovery
-      : window.location.pathname === '/owner/members'
-        ? OwnerMembers
-        : App;
+  pagePath === '/setup/owner'
+    ? () => <OwnerSetup initialToken={oneTimeToken} />
+    : pagePath === '/verify-email'
+      ? () => <EmailVerification initialToken={oneTimeToken} />
+      : pagePath === '/account/sessions'
+        ? AccountSessions
+        : pagePath === '/account/deletion/recover'
+          ? AccountDeletionRecovery
+          : pagePath === '/owner/members'
+            ? OwnerMembers
+            : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

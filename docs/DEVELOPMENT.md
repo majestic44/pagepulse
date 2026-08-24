@@ -66,8 +66,9 @@ The command requires `APP_BASE_URL` and `DATABASE_URL`, creates one pending owne
 owner completes setup, rerun it with the same email to revoke the prior unused URL and issue a replacement;
 it refuses after the owner becomes active. Treat the printed URL as a credential: do not run this command in
 CI or capture its output in logs. Configure `OWNER_SETUP_TOKEN_TTL_MINUTES` between 5 and 1,440 when a
-different lifetime is needed. Redeem its token through `POST /api/v1/auth/owner-setup` with a password of at least
-12 characters. The response intentionally does not expose a verification token.
+different lifetime is needed. Open the URL in a browser, choose a password of at least 12 characters, then use the
+verification link delivered to the owner email address. The setup and verification URLs remove their token query from
+the browser address bar before rendering. The API response intentionally does not expose a verification token.
 
 ## Authentication configuration
 
@@ -81,8 +82,12 @@ Session cookies are host-only, HTTP-only and `SameSite=Strict`; production deplo
 (30 days). The idle lifetime must not exceed the absolute lifetime. Local HTTP development intentionally omits the
 `Secure` attribute so browser session testing works on loopback; production requires HTTPS for `APP_BASE_URL`.
 
-Email delivery is not part of this identity foundation. It is deferred to the Phase 5 provider work, so the current
-development stack cannot send verification or password-reset messages and never prints those token values to logs.
+`AUTH_EMAIL_DELIVERY_MODE` defaults to `disabled`. The `compose.dev.yaml` override is intentionally the only shipped
+configuration that enables `mailpit`; it sends verification messages only to the internal development Mailpit service,
+available on the host at `http://127.0.0.1:8025`. Mailpit mode requires `NODE_ENV=development` and `APP_BASE_URL`.
+It is rejected in test and production environments. PagePulse does not return, log, queue or persist a plaintext
+verification token. Production verification and all password-reset delivery remain deferred until the reviewed
+Phase 5 provider adapters are available.
 
 ## TOTP configuration
 

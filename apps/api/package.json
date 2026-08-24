@@ -20,9 +20,11 @@
     "@pagepulse/db": "workspace:*",
     "@pagepulse/queue": "workspace:*",
     "@sinclair/typebox": "^0.34.41",
-    "fastify": "^5.6.2"
+    "fastify": "^5.6.2",
+    "nodemailer": "^9.0.5"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.20.6"
   }
 }

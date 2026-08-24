@@ -1,4 +1,4 @@
-# ADR 0005: Authentication Token and Deferred Delivery Boundary
+# ADR 0005: Authentication Token and Development Delivery Boundary
 
 - Status: Accepted
 - Date: 2026-08-23
@@ -10,13 +10,17 @@ password-reset credentials only as SHA-256 digests with expiry, use and revocati
 unauthenticated authentication actions through Redis using a one-way hash of the requester IP, and fail closed when
 the limit cannot be evaluated.
 
-The API deliberately never returns a verification or reset token. Outbound email/provider delivery is deferred to
-Phase 5; a future adapter must create and deliver a fresh plaintext token in the same request lifecycle while only
-the digest is persisted. It must not put the plaintext token into a queue payload, outbox event or structured log.
+The API deliberately never returns a verification or reset token. Development Compose may enable a single Mailpit
+adapter, which sends a fresh plaintext verification token directly in the requesting API process while only its digest
+is persisted. The adapter has a fixed internal destination (`mailpit:1025`) and is rejected outside development. It
+must not put the plaintext token into a queue payload, outbox event or structured log.
+
+Production verification-provider delivery and password-reset delivery remain deferred to Phase 5. Their future
+adapters must follow the same direct-delivery and plaintext-token handling rule.
 
 ## Consequences
 
 The database remains authoritative for account state and token consumption, while Redis only coordinates abuse
-protection. Password verification and account state can be tested now without adding an SMTP or provider dependency.
-Until the delivery adapter exists, deployments cannot complete user-facing email verification or password reset and
-must not advertise those flows as available.
+protection. Local owner and invitation onboarding can be tested end-to-end through Mailpit without adding a real SMTP
+provider or letting configuration choose an arbitrary network destination. Production deployments fail closed for
+verification delivery and must not advertise it or password resets as available until their provider work is complete.
