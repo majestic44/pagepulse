@@ -16,6 +16,7 @@ import {
   AuthenticationStateError,
   AuthenticationTokenError,
   createDatabasePool,
+  hashAuditRequesterIp,
   MemberLifecycleStateError,
   MemberNotFoundError,
   probeDatabase,
@@ -30,6 +31,7 @@ import {
   AuthenticationAcceptedResponse,
   AuthenticationUnavailableResponse,
   AuthenticationCredentials,
+  AuditEventsResponse,
   DiagnosticsResponse,
   EmailVerificationRequest,
   ForbiddenResponse,
@@ -55,6 +57,7 @@ import {
 } from '@pagepulse/contracts';
 import { createRedisConnection, probeRedis } from '@pagepulse/queue';
 import { createAccountDeletionService } from './account-deletion.js';
+import { createAuditService } from './audit.js';
 import {
   createAuthenticationService,
   type AuthenticationDependencies,
@@ -136,6 +139,7 @@ async function createDefaultAuthenticationDependencies(
     });
     return {
       accountDeletion: createAccountDeletionService({ pool }),
+      audit: createAuditService({ pool }),
       close: async () => {
         await Promise.allSettled([pool.end(), redis.quit()]);
       },
@@ -277,6 +281,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     monitorLimit: member.monitorLimit,
     status: member.status,
   });
+  const auditContext = (request: FastifyRequest) => ({
+    requesterIpHash: hashAuditRequesterIp(request.ip),
+    requestId: request.id,
+  });
 
   async function getCurrentSession(request: FastifyRequest, reply: FastifyReply) {
     const token = readSessionCookie(request.headers.cookie);
@@ -368,6 +376,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         const verification = await authentication.service.redeemOwnerSetup(
           request.body.token,
           request.body.password,
+          auditContext(request),
         );
         try {
           await authentication.emailDelivery.sendVerification(verification);
@@ -409,6 +418,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         const verification = await authentication.service.redeemInvitation(
           request.body.token,
           request.body.password,
+          auditContext(request),
         );
         try {
           await authentication.emailDelivery.sendVerification(verification);
@@ -444,7 +454,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        await authentication.service.confirmEmailVerification(request.body.token);
+        await authentication.service.confirmEmailVerification(
+          request.body.token,
+          auditContext(request),
+        );
         return reply.code(204).send();
       } catch (error) {
         if (isInvalidAuthenticationRequest(error)) {
@@ -479,7 +492,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
         ReturnType<AuthenticationDependencies['service']['requestEmailVerification']>
       >;
       try {
-        verification = await authentication.service.requestEmailVerification(request.body.email);
+        verification = await authentication.service.requestEmailVerification(
+          request.body.email,
+          auditContext(request),
+        );
       } catch (error) {
         if (error instanceof EmailValidationError) {
           return reply.code(202).send({ status: 'verification_required' });
@@ -544,6 +560,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
               userId: login.user.id,
             },
             readSessionCookie(request.headers.cookie),
+            auditContext(request),
           );
           reply.header(
             'Set-Cookie',
@@ -594,6 +611,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
             userId: user.userId,
           },
           readSessionCookie(request.headers.cookie),
+          auditContext(request),
         );
         reply.header('Set-Cookie', [
           clearTotpLoginChallengeCookie(sessionCookieIsSecure),
@@ -665,6 +683,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         await authentication.service.completePasswordReset(
           request.body.token,
           request.body.password,
+          auditContext(request),
         );
         return reply.code(204).send();
       } catch (error) {
@@ -691,7 +710,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
       if (token) {
         try {
           const authentication = await getAuthentication();
-          await authentication.sessions.revokeByToken(token);
+          await authentication.sessions.revokeByToken(token, auditContext(request));
         } catch {
           return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
         }
@@ -743,10 +762,13 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        return await current.authentication.totp.beginEnrollment({
-          email: current.session.email,
-          userId: current.session.userId,
-        });
+        return await current.authentication.totp.beginEnrollment(
+          {
+            email: current.session.email,
+            userId: current.session.userId,
+          },
+          auditContext(request),
+        );
       } catch (error) {
         if (error instanceof AuthenticationStateError) {
           return reply.code(400).send(invalidAuthenticationResponse);
@@ -785,6 +807,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
             current.session.userId,
             current.session.id,
             request.body.code,
+            auditContext(request),
           ),
         };
       } catch (error) {
@@ -827,6 +850,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
             current.session.userId,
             current.session.id,
             request.body,
+            auditContext(request),
           ),
         };
       } catch (error) {
@@ -868,6 +892,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
           current.session.userId,
           current.session.id,
           request.body,
+          auditContext(request),
         );
         return reply.code(204).send();
       } catch (error) {
@@ -928,6 +953,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         }
         const deletion = await current.authentication.accountDeletion.request(
           current.session.userId,
+          auditContext(request),
         );
         reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
         return {
@@ -965,7 +991,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply;
       }
       try {
-        await authentication.accountDeletion.recover(request.body.token);
+        await authentication.accountDeletion.recover(request.body.token, auditContext(request));
         return reply.code(204).send();
       } catch (error) {
         if (error instanceof AccountDeletionTokenError) {
@@ -1027,6 +1053,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
         const revoked = await current.authentication.sessions.revoke(
           current.session.userId,
           request.params.sessionId,
+          auditContext(request),
         );
         if (revoked && request.params.sessionId === current.session.id) {
           reply.header('Set-Cookie', clearSessionCookie(sessionCookieIsSecure));
@@ -1058,8 +1085,44 @@ export async function buildApp(options: BuildAppOptions = {}) {
         await current.authentication.sessions.revokeOthers(
           current.session.userId,
           current.session.id,
+          auditContext(request),
         );
         return reply.code(204).send();
+      } catch {
+        return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+      }
+    },
+  );
+
+  app.get(
+    '/api/v1/owner/audit-events',
+    {
+      schema: {
+        response: {
+          200: AuditEventsResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          503: AuthenticationUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentOwnerSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const events = await current.authentication.audit.list();
+        return {
+          events: events.map((event) => ({
+            action: event.action,
+            actorUserId: event.actorUserId ?? null,
+            createdAt: event.createdAt.toISOString(),
+            id: event.id,
+            targetId: event.targetId ?? null,
+            targetType: event.targetType,
+          })),
+        };
       } catch {
         return reply.code(503).send({ error: 'Authentication temporarily unavailable' });
       }
@@ -1095,14 +1158,21 @@ export async function buildApp(options: BuildAppOptions = {}) {
   async function completeOwnerMemberAction(
     request: FastifyRequest<{ Params: { memberId: string } }>,
     reply: FastifyReply,
-    action: (authentication: AuthenticationDependencies, memberId: string) => Promise<void>,
+    action: (
+      authentication: AuthenticationDependencies,
+      memberId: string,
+      audit: Readonly<{ actorUserId: string; requesterIpHash: string; requestId: string }>,
+    ) => Promise<void>,
   ) {
     const current = await getCurrentOwnerSession(request, reply);
     if (!current) {
       return reply;
     }
     try {
-      await action(current.authentication, request.params.memberId);
+      await action(current.authentication, request.params.memberId, {
+        ...auditContext(request),
+        actorUserId: current.session.userId,
+      });
       return reply.code(204).send();
     } catch (error) {
       if (error instanceof MemberNotFoundError) {
@@ -1131,8 +1201,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
       },
     },
     (request, reply) =>
-      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
-        authentication.members.suspend(memberId),
+      completeOwnerMemberAction(request, reply, (authentication, memberId, audit) =>
+        authentication.members.suspend(memberId, audit),
       ),
   );
 
@@ -1152,8 +1222,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
       },
     },
     (request, reply) =>
-      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
-        authentication.members.reactivate(memberId),
+      completeOwnerMemberAction(request, reply, (authentication, memberId, audit) =>
+        authentication.members.reactivate(memberId, audit),
       ),
   );
 
@@ -1172,8 +1242,8 @@ export async function buildApp(options: BuildAppOptions = {}) {
       },
     },
     (request, reply) =>
-      completeOwnerMemberAction(request, reply, (authentication, memberId) =>
-        authentication.members.remove(memberId),
+      completeOwnerMemberAction(request, reply, (authentication, memberId, audit) =>
+        authentication.members.remove(memberId, audit),
       ),
   );
 

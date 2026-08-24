@@ -1,8 +1,11 @@
 import { createOpaqueToken, hashOpaqueToken } from '@pagepulse/auth';
 import {
+  AuditActions,
+  recordAuditEvent,
   purgeExpiredAccountDeletions,
   recoverAccountDeletion,
   scheduleAccountDeletion,
+  type AuditContext,
   type AccountDeletionPool,
   withAccountDeletionTransaction,
 } from '@pagepulse/db';
@@ -16,8 +19,8 @@ export type AccountDeletionRecovery = Readonly<{
 
 export type AccountDeletionService = Readonly<{
   purgeExpired: () => Promise<number>;
-  recover: (token: string) => Promise<void>;
-  request: (userId: string) => Promise<AccountDeletionRecovery>;
+  recover: (token: string, audit?: AuditContext) => Promise<void>;
+  request: (userId: string, audit?: AuditContext) => Promise<AccountDeletionRecovery>;
 }>;
 
 export type AccountDeletionServiceOptions = Readonly<{
@@ -41,24 +44,39 @@ export function createAccountDeletionService({
       );
     },
 
-    async recover(token) {
+    async recover(token, audit) {
       const current = now();
-      await withAccountDeletionTransaction(pool, (connection) =>
-        recoverAccountDeletion(connection, hashOpaqueToken(token), current),
-      );
+      await withAccountDeletionTransaction(pool, async (connection) => {
+        const userId = await recoverAccountDeletion(connection, hashOpaqueToken(token), current);
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.accountDeletionRecovered,
+          createdAt: current,
+          targetId: userId,
+          targetType: 'account',
+        });
+      });
     },
 
-    async request(userId) {
+    async request(userId, audit) {
       const current = now();
       const token = createOpaqueToken();
       const deadline = deletionDeadline(current);
-      await withAccountDeletionTransaction(pool, (connection) =>
-        scheduleAccountDeletion(connection, userId, {
+      await withAccountDeletionTransaction(pool, async (connection) => {
+        await scheduleAccountDeletion(connection, userId, {
           deadline,
           recoveryTokenHash: hashOpaqueToken(token),
           requestedAt: current,
-        }),
-      );
+        });
+        await recordAuditEvent(connection, {
+          ...audit,
+          action: AuditActions.accountDeletionRequested,
+          actorUserId: userId,
+          createdAt: current,
+          targetId: userId,
+          targetType: 'account',
+        });
+      });
       return { deadline, token };
     },
   };

@@ -133,9 +133,21 @@ describe('account deletion persistence', () => {
       'UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
       [deadline, 'member-id'],
     );
-    expect(query).toHaveBeenLastCalledWith(
+    expect(query).toHaveBeenNthCalledWith(
+      3,
       "DELETE FROM users WHERE id = ? AND role = 'member' AND status = 'deleting' AND deletion_deadline <= ?",
       ['member-id', deadline],
     );
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining('INSERT INTO audit_events'), [
+      expect.any(String),
+      null,
+      'account.deletion.completed',
+      'account',
+      'member-id',
+      null,
+      null,
+      new Date('2026-11-29T12:00:00.000Z'),
+      deadline,
+    ]);
   });
 });

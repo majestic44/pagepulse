@@ -21,9 +21,9 @@ const milestones = [
   },
   {
     detail:
-      'Owner bootstrap, password sign-in, authenticator-app MFA, sessions, member lifecycle and recoverable deletion are in place.',
+      'Owner bootstrap, password sign-in, authenticator-app MFA, sessions, member lifecycle, recoverable deletion and retained audit history.',
     label: 'Phase 2',
-    status: 'In progress',
+    status: 'Complete',
     title: 'Identity and administration',
   },
 ] as const;
@@ -71,6 +71,19 @@ type ManagedMember = Readonly<{
 type OwnerMembersState =
   | Readonly<{ kind: 'forbidden' | 'loading' | 'signed-out' }>
   | Readonly<{ kind: 'ready'; members: ReadonlyArray<ManagedMember> }>;
+
+type AuditEventSummary = Readonly<{
+  action: string;
+  actorUserId: string | null;
+  createdAt: string;
+  id: string;
+  targetId: string | null;
+  targetType: 'account' | 'member' | 'session' | 'system';
+}>;
+
+type OwnerAuditState =
+  | Readonly<{ kind: 'forbidden' | 'loading' | 'signed-out' }>
+  | Readonly<{ events: ReadonlyArray<AuditEventSummary>; kind: 'ready' }>;
 
 const pagePath = window.location.pathname;
 const oneTimeToken =
@@ -899,6 +912,107 @@ function OwnerMembers() {
   );
 }
 
+function OwnerAuditEvents() {
+  const [state, setState] = useState<OwnerAuditState>({ kind: 'loading' });
+  const [message, setMessage] = useState<string>();
+
+  const loadAuditEvents = useCallback(async () => {
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/owner/audit-events', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        setState({ kind: 'signed-out' });
+        return;
+      }
+      if (response.status === 403) {
+        setState({ kind: 'forbidden' });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to load audit events');
+      }
+      const payload = (await response.json()) as { events: ReadonlyArray<AuditEventSummary> };
+      setState({ events: payload.events, kind: 'ready' });
+    } catch {
+      setMessage('Audit history is temporarily unavailable. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAuditEvents();
+  }, [loadAuditEvents]);
+
+  if (state.kind === 'loading') {
+    return (
+      <main className="shell account-shell" aria-live="polite">
+        <p className="eyebrow">OWNER ADMINISTRATION</p>
+        <h1>Loading audit history…</h1>
+      </main>
+    );
+  }
+
+  if (state.kind !== 'ready') {
+    const signedOut = state.kind === 'signed-out';
+    return (
+      <main className="shell account-shell">
+        <a className="back-link" href="/">
+          ← Project status
+        </a>
+        <p className="eyebrow">OWNER ADMINISTRATION</p>
+        <h1>
+          {signedOut ? 'Sign in as an owner to view audit history.' : 'Owner access is required.'}
+        </h1>
+        <p className="account-intro">
+          {signedOut
+            ? 'Use Account security to create a browser session, then return here.'
+            : 'Audit history is visible only to owner accounts.'}
+        </p>
+        {signedOut ? (
+          <a className="account-link inline-link" href="/account/sessions">
+            Go to Account security
+          </a>
+        ) : null}
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/">
+        ← Project status
+      </a>
+      <p className="eyebrow">OWNER ADMINISTRATION</p>
+      <h1>Security audit history</h1>
+      <p className="account-intro">
+        The newest 100 security and administrative events are retained for 90 days. This view omits
+        email addresses, requester network details, tokens and request bodies.
+      </p>
+      {state.events.length === 0 ? (
+        <p className="account-intro">No audit events have been recorded yet.</p>
+      ) : (
+        <ol className="member-list" aria-live="polite">
+          {state.events.map((event) => (
+            <li key={event.id}>
+              <div>
+                <div className="session-heading">
+                  <h2>{event.action.replaceAll('.', ' · ')}</h2>
+                  <strong>{event.targetType}</strong>
+                </div>
+                <p>Recorded {formatDate(event.createdAt)}</p>
+                <p>Actor ID: {event.actorUserId ?? 'System or unauthenticated flow'}</p>
+                <p>Target ID: {event.targetId ?? 'Not applicable'}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+    </main>
+  );
+}
+
 function AccountDeletionRecovery() {
   const [token, setToken] = useState('');
   const [message, setMessage] = useState<string>();
@@ -1233,6 +1347,9 @@ function App() {
         <a className="account-link" href="/owner/members">
           Member administration
         </a>
+        <a className="account-link" href="/owner/audit-events">
+          Audit history
+        </a>
         <a className="account-link" href="/account/deletion/recover">
           Recover deletion
         </a>
@@ -1277,10 +1394,10 @@ function App() {
 
       <section className="next" aria-labelledby="next-title">
         <p className="eyebrow">UP NEXT</p>
-        <h2 id="next-title">Finish identity, then begin monitor configuration.</h2>
+        <h2 id="next-title">Identity is complete. Monitor configuration is next.</h2>
         <p>
-          Security and admin audit history is the remaining identity work. Monitor creation and
-          page-change detection begin in Phase 3 once those access controls are complete.
+          Phase 3 begins with monitor creation, safety validation, pause/resume controls and member
+          limits. Page-change detection follows after monitor configuration is in place.
         </p>
       </section>
     </main>
@@ -1298,7 +1415,9 @@ const Page =
           ? AccountDeletionRecovery
           : pagePath === '/owner/members'
             ? OwnerMembers
-            : App;
+            : pagePath === '/owner/audit-events'
+              ? OwnerAuditEvents
+              : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -105,7 +105,9 @@ and a fresh TOTP proof when a factor is enabled, revokes every session, and disp
 once. Save that token outside PagePulse; it is not logged, queued, or persisted in plaintext. Submit it to
 `POST /api/v1/account/deletion/recover` within seven days to restore the account, then sign in again. The maintenance
 worker performs an immediate cleanup at startup and repeats it every `ACCOUNT_DELETION_SWEEP_INTERVAL_MS` (one hour by
-default), permanently deleting expired member accounts according to MariaDB's authoritative deadline.
+default), permanently deleting expired member accounts and removing expired 90-day audit events according to MariaDB's
+authoritative deadlines. Owners can inspect the newest 100 redacted events at `/owner/audit-events`; that page never
+shows email addresses, raw IP addresses, IP hashes, request IDs, tokens or request bodies.
 
 ## Codex workflow
 

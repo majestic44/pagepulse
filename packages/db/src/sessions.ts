@@ -225,8 +225,22 @@ export async function revokeSessionByTokenHash(
   tokenHash: string,
   now = new Date(),
 ) {
-  await connection.query(
-    'UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL',
-    [now, tokenHash],
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT id, user_id AS userId
+     FROM sessions
+     WHERE token_hash = ? AND revoked_at IS NULL
+     LIMIT 1 FOR UPDATE`,
+    [tokenHash],
   );
+  const row = rows[0];
+  if (!row) {
+    return undefined;
+  }
+  const record = asRecord(row);
+  const session = { id: readString(record, 'id'), userId: readString(record, 'userId') };
+  await connection.query('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL', [
+    now,
+    session.id,
+  ]);
+  return session;
 }

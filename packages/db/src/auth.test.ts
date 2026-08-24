@@ -178,7 +178,7 @@ describe('authentication persistence', () => {
         },
         now,
       ),
-    ).resolves.toBe(true);
+    ).resolves.toBe('owner-id');
 
     expect(query).toHaveBeenCalledWith(
       `SELECT id, status, password_hash AS passwordHash, email_verified_at AS emailVerifiedAt

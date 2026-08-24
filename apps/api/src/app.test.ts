@@ -9,6 +9,7 @@ import {
 } from '@pagepulse/db';
 import type { AuthenticationDependencies, AuthenticationService } from './auth.js';
 import type { AccountDeletionService } from './account-deletion.js';
+import type { AuditService } from './audit.js';
 import type { VerificationEmailDelivery } from './email-delivery.js';
 import { buildApp } from './app.js';
 import { createHealthService } from './health.js';
@@ -29,6 +30,7 @@ function createAuthenticationDependencies(
   members: Partial<MemberService> = {},
   accountDeletion: Partial<AccountDeletionService> = {},
   emailDelivery: Partial<VerificationEmailDelivery> = {},
+  audit: Partial<AuditService> = {},
 ): AuthenticationDependencies {
   return {
     accountDeletion: {
@@ -39,6 +41,10 @@ function createAuthenticationDependencies(
         token: 'C'.repeat(43),
       }),
       ...accountDeletion,
+    },
+    audit: {
+      list: vi.fn().mockResolvedValue([]),
+      ...audit,
     },
     members: {
       list: vi.fn().mockResolvedValue([]),
@@ -143,6 +149,8 @@ const memberSession: ActiveSession = {
   role: 'member',
   userId: 'member-id',
 };
+
+const localAuditIpHash = '12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0';
 
 describe('health contract', () => {
   it('returns liveness without probing dependencies', async () => {
@@ -300,6 +308,7 @@ describe('authentication contract', () => {
     expect(authentication.service.redeemOwnerSetup).toHaveBeenCalledWith(
       'owner-setup-token',
       'a secure password',
+      expect.objectContaining({ requestId: 'req-1', requesterIpHash: localAuditIpHash }),
     );
     expect(authentication.emailDelivery.sendVerification).toHaveBeenCalledWith({
       email: 'owner@example.test',
@@ -469,6 +478,7 @@ describe('authentication contract', () => {
     expect(authentication.sessions.issue).toHaveBeenCalledWith(
       { deviceLabel: 'Unknown browser on unknown device', userId: authenticatedUser.id },
       undefined,
+      expect.objectContaining({ requestId: 'req-1', requesterIpHash: localAuditIpHash }),
     );
   });
 
@@ -552,6 +562,7 @@ describe('authentication contract', () => {
       'owner-id',
       'session-id',
       '123456',
+      expect.objectContaining({ requestId: 'req-2', requesterIpHash: localAuditIpHash }),
     );
   });
 
@@ -582,11 +593,15 @@ describe('authentication contract', () => {
       'owner-id',
       'session-id',
       { recoveryCode: 'ABCD-EFGH-JKLM' },
+      expect.objectContaining({ requestId: 'req-1', requesterIpHash: localAuditIpHash }),
     );
     expect(disabled.statusCode).toBe(204);
-    expect(authentication.totp.disable).toHaveBeenCalledWith('owner-id', 'session-id', {
-      code: '123456',
-    });
+    expect(authentication.totp.disable).toHaveBeenCalledWith(
+      'owner-id',
+      'session-id',
+      { code: '123456' },
+      expect.objectContaining({ requestId: 'req-2', requesterIpHash: localAuditIpHash }),
+    );
   });
 
   it('lists the current active session without exposing its token', async () => {
@@ -633,7 +648,11 @@ describe('authentication contract', () => {
 
     expect(response.statusCode).toBe(204);
     expect(response.headers['set-cookie']).toContain('Max-Age=0');
-    expect(authentication.sessions.revoke).toHaveBeenCalledWith('owner-id', 'session-id');
+    expect(authentication.sessions.revoke).toHaveBeenCalledWith(
+      'owner-id',
+      'session-id',
+      expect.objectContaining({ requestId: 'req-1', requesterIpHash: localAuditIpHash }),
+    );
   });
 
   it('requires the current password and factor proof before scheduling deletion, then clears the session', async () => {
@@ -665,7 +684,10 @@ describe('authentication contract', () => {
       'a secure password',
     );
     expect(authentication.totp.verify).toHaveBeenCalledWith('member-id', { code: '123456' });
-    expect(authentication.accountDeletion.request).toHaveBeenCalledWith('member-id');
+    expect(authentication.accountDeletion.request).toHaveBeenCalledWith(
+      'member-id',
+      expect.objectContaining({ requestId: 'req-1', requesterIpHash: localAuditIpHash }),
+    );
   });
 
   it('does not schedule deletion with an invalid password confirmation', async () => {
@@ -773,9 +795,70 @@ describe('authentication contract', () => {
     expect(suspended.statusCode).toBe(204);
     expect(reactivated.statusCode).toBe(204);
     expect(removed.statusCode).toBe(204);
-    expect(authentication.members.suspend).toHaveBeenCalledWith('member-id');
-    expect(authentication.members.reactivate).toHaveBeenCalledWith('member-id');
-    expect(authentication.members.remove).toHaveBeenCalledWith('member-id');
+    expect(authentication.members.suspend).toHaveBeenCalledWith(
+      'member-id',
+      expect.objectContaining({ actorUserId: 'owner-id', requestId: 'req-2' }),
+    );
+    expect(authentication.members.reactivate).toHaveBeenCalledWith(
+      'member-id',
+      expect.objectContaining({ actorUserId: 'owner-id', requestId: 'req-3' }),
+    );
+    expect(authentication.members.remove).toHaveBeenCalledWith(
+      'member-id',
+      expect.objectContaining({ actorUserId: 'owner-id', requestId: 'req-4' }),
+    );
+  });
+
+  it('limits audit history to owners and omits requester network metadata', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        list: vi.fn().mockResolvedValue([
+          {
+            action: 'member.suspended',
+            actorUserId: 'owner-id',
+            createdAt: new Date('2026-08-24T12:00:00.000Z'),
+            expiresAt: new Date('2026-11-22T12:00:00.000Z'),
+            id: 'audit-event-id',
+            requesterIpHash: 'a'.repeat(64),
+            requestId: 'req-1',
+            targetId: 'member-id',
+            targetType: 'member',
+          },
+        ]),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/owner/audit-events',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toEqual({
+      events: [
+        {
+          action: 'member.suspended',
+          actorUserId: 'owner-id',
+          createdAt: '2026-08-24T12:00:00.000Z',
+          id: 'audit-event-id',
+          targetId: 'member-id',
+          targetType: 'member',
+        },
+      ],
+    });
+    expect(response.body).not.toContain('a'.repeat(64));
+    expect(response.body).not.toContain('req-1');
   });
 
   it('forbids members from accessing owner member management', async () => {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 
+import { AuditActions, recordAuditEvent } from './audit.js';
 import { revokeSessionsForUser } from './sessions.js';
 
 type AccountDeletionConnection = Pick<
@@ -166,6 +167,7 @@ export async function recoverAccountDeletion(
     "UPDATE users SET status = 'active', deletion_requested_at = NULL, deletion_deadline = NULL WHERE id = ?",
     [readString(record, 'userId')],
   );
+  return readString(record, 'userId');
 }
 
 export async function purgeExpiredAccountDeletions(
@@ -192,6 +194,12 @@ export async function purgeExpiredAccountDeletions(
       [id, now],
     );
     if ('affectedRows' in result && result.affectedRows === 1) {
+      await recordAuditEvent(connection, {
+        action: AuditActions.accountDeletionCompleted,
+        createdAt: now,
+        targetId: id,
+        targetType: 'account',
+      });
       deleted += 1;
     }
   }

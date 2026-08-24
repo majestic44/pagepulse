@@ -56,7 +56,8 @@ its loopback-only web UI can be published on the host; it remains absent from pr
 - Transactional outbox rows bridge MariaDB commits to BullMQ. A publisher marks a row published only after BullMQ accepts its deterministic notification job ID, so a crash can cause an at-least-once retry but cannot lose a committed event; notification consumers must remain idempotent.
 - Scheduler reconciliation reads active, revision-matching `monitor_schedules` rows from MariaDB and upserts their deterministic BullMQ Job Schedulers. It removes only stale schedulers with the PagePulse-owned key prefix, repairing Redis after restart or data loss without deleting unrelated jobs.
 - The maintenance worker performs an immediate and then periodic MariaDB transaction that permanently deletes expired
-  `deleting` member accounts. The `users.deletion_deadline` index drives selection; Redis is not part of deletion authority.
+  `deleting` member accounts and removes expired audit events in bounded batches. The `users.deletion_deadline` and
+  `audit_events.expires_at` indexes drive selection; Redis is not part of either retention authority.
 - File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
 
 ## Queue contracts
