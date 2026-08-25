@@ -12,8 +12,8 @@ export const MIGRATION_LOCK_NAME = 'pagepulse_migrations';
 export const MIGRATION_LOCK_TIMEOUT_SECONDS = 60;
 
 export const currentSchemaCompatibility = Object.freeze({
-  schemaVersion: 9,
-  migrationId: 'monitor-schedule-configuration',
+  schemaVersion: 10,
+  migrationId: 'monitor-target-configuration',
   minimumAppVersion: '0.0.0',
 });
 

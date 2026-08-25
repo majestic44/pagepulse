@@ -21,6 +21,7 @@
   "dependencies": {
     "@pagepulse/auth": "workspace:*",
     "@pagepulse/config": "workspace:*",
+    "@pagepulse/monitor-engine": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "mysql2": "^3.15.3"
   },

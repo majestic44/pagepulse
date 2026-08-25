@@ -28,7 +28,7 @@ const milestones = [
   },
   {
     detail:
-      'Members can create, revise, pause, resume and delete public monitor configurations with protected revisions.',
+      'Members can create, revise, pause, resume and delete public monitors, choose schedules and preview whole-page or CSS-selector extraction.',
     label: 'Phase 3',
     status: 'In progress',
     title: 'Monitor configuration',
@@ -114,6 +114,24 @@ type MonitorScheduleSummary = Readonly<{
 type MonitorScheduleResponse = Readonly<{
   monitor: MonitorSummary;
   schedule: MonitorScheduleSummary | null;
+}>;
+
+type MonitorTargetType = 'css_selector' | 'whole_page';
+
+type MonitorTargetSummary = Readonly<{
+  selector: string | null;
+  targetType: MonitorTargetType;
+}>;
+
+type MonitorTargetResponse = Readonly<{
+  monitor: MonitorSummary;
+  target: MonitorTargetSummary;
+}>;
+
+type MonitorTargetPreview = Readonly<{
+  matchCount: number;
+  text: string;
+  truncated: boolean;
 }>;
 
 type MonitorManagementState =
@@ -787,6 +805,10 @@ function MonitorManagement() {
   const [hourlyMinute, setHourlyMinute] = useState('0');
   const [dailyTime, setDailyTime] = useState('09:00');
   const [customIntervalMinutes, setCustomIntervalMinutes] = useState('60');
+  const [targetMonitor, setTargetMonitor] = useState<MonitorSummary>();
+  const [targetType, setTargetType] = useState<MonitorTargetType>('whole_page');
+  const [targetSelector, setTargetSelector] = useState('');
+  const [targetPreview, setTargetPreview] = useState<MonitorTargetPreview>();
   const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState<string>();
 
@@ -844,6 +866,18 @@ function MonitorManagement() {
     return `Every ${value.customIntervalMinutes} minutes`;
   }
 
+  function targetPayload() {
+    return targetType === 'css_selector'
+      ? { selector: targetSelector, targetType }
+      : { targetType };
+  }
+
+  function loadTargetForm(value: MonitorTargetSummary) {
+    setTargetType(value.targetType);
+    setTargetSelector(value.selector ?? '');
+    setTargetPreview(undefined);
+  }
+
   async function createMonitor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting('create');
@@ -874,7 +908,9 @@ function MonitorManagement() {
       );
       setName('');
       setUrl('');
-      setMessage('Monitor configuration created. Configure its schedule when you are ready.');
+      setMessage(
+        'Monitor configuration created. Configure its target and schedule when you are ready.',
+      );
     } catch {
       setMessage('Monitor configuration is temporarily unavailable. Please try again.');
     } finally {
@@ -1107,6 +1143,124 @@ function MonitorManagement() {
     }
   }
 
+  async function openTarget(monitor: MonitorSummary) {
+    setSubmitting(monitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(monitor.id)}/target`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error('Unable to load monitor target');
+      }
+      const payload = (await response.json()) as MonitorTargetResponse;
+      replaceMonitor(payload.monitor);
+      setTargetMonitor(payload.monitor);
+      loadTargetForm(payload.target);
+    } catch {
+      setMessage('Extraction configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function saveTarget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!targetMonitor) {
+      return;
+    }
+    setSubmitting(targetMonitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(
+        `/api/v1/monitors/${encodeURIComponent(targetMonitor.id)}/target`,
+        {
+          body: JSON.stringify(targetPayload()),
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'If-Match': `"${targetMonitor.revision}"`,
+          },
+          method: 'PUT',
+        },
+      );
+      if (response.status === 409) {
+        await loadMonitors();
+        setTargetMonitor(undefined);
+        setTargetPreview(undefined);
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (response.status === 400) {
+        setMessage('Choose whole-page extraction or a valid CSS selector.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to save monitor target');
+      }
+      const result = (await response.json()) as MonitorTargetResponse;
+      replaceMonitor(result.monitor);
+      setTargetMonitor(result.monitor);
+      loadTargetForm(result.target);
+      setMessage(
+        result.target.targetType === 'whole_page'
+          ? 'Whole-page extraction saved.'
+          : 'CSS selector extraction saved.',
+      );
+    } catch {
+      setMessage('Extraction configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function previewTarget() {
+    if (!targetMonitor) {
+      return;
+    }
+    setSubmitting(targetMonitor.id);
+    setMessage(undefined);
+    setTargetPreview(undefined);
+    try {
+      const response = await fetch(
+        `/api/v1/monitors/${encodeURIComponent(targetMonitor.id)}/target/preview`,
+        {
+          body: JSON.stringify(targetPayload()),
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+        },
+      );
+      if (response.status === 400) {
+        setMessage('Choose whole-page extraction or a valid CSS selector before previewing.');
+        return;
+      }
+      if (response.status === 422) {
+        const payload = (await response.json()) as { error?: string };
+        setMessage(
+          payload.error === 'Preview target is not allowed'
+            ? 'This monitor URL cannot be previewed safely.'
+            : 'The page could not provide a safe HTML preview. Check its availability and try again.',
+        );
+        return;
+      }
+      if (response.status === 429) {
+        setMessage('Too many preview attempts. Please wait a moment and try again.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to preview monitor target');
+      }
+      const payload = (await response.json()) as { preview: MonitorTargetPreview };
+      setTargetPreview(payload.preview);
+      setMessage('Extraction preview loaded. Review the selected text before saving.');
+    } catch {
+      setMessage('Extraction preview is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
   if (state.kind === 'loading') {
     return (
       <main className="shell account-shell" aria-live="polite">
@@ -1145,8 +1299,7 @@ function MonitorManagement() {
       <p className="account-intro">
         Create public HTTP or HTTPS monitors without embedded credentials. Your account limit is
         enforced by the server; new accounts start with up to 50 monitors. Set an hourly, daily, or
-        custom schedule in your IANA time zone. Extraction configuration follows in the next Phase 3
-        item.
+        custom schedule in your IANA time zone, then select whole-page or CSS-selector extraction.
       </p>
 
       <form className="sign-in-form" onSubmit={(event) => void createMonitor(event)}>
@@ -1333,6 +1486,73 @@ function MonitorManagement() {
         </form>
       ) : null}
 
+      {targetMonitor ? (
+        <form className="sign-in-form totp-panel" onSubmit={(event) => void saveTarget(event)}>
+          <h2>Extraction target for {targetMonitor.name}</h2>
+          <p className="account-intro">
+            Preview requests fetch only this monitor's public URL, use bounded text-only output, and
+            reject private or redirected internal destinations.
+          </p>
+          <label>
+            Target type
+            <select
+              onChange={(event) => setTargetType(event.target.value as MonitorTargetType)}
+              value={targetType}
+            >
+              <option value="whole_page">Whole page</option>
+              <option value="css_selector">CSS selector</option>
+            </select>
+          </label>
+          {targetType === 'css_selector' ? (
+            <label>
+              CSS selector
+              <input
+                autoComplete="off"
+                maxLength={512}
+                onChange={(event) => setTargetSelector(event.target.value)}
+                placeholder="main > article.job"
+                required
+                type="text"
+                value={targetSelector}
+              />
+            </label>
+          ) : null}
+          {targetPreview ? (
+            <section className="extraction-preview" aria-live="polite">
+              <p className="eyebrow">PREVIEW</p>
+              <p>
+                {targetPreview.matchCount} matching{' '}
+                {targetPreview.matchCount === 1 ? 'element' : 'elements'}
+                {targetPreview.truncated ? ' · text truncated' : ''}
+              </p>
+              <pre>{targetPreview.text || 'The selected region contains no readable text.'}</pre>
+            </section>
+          ) : null}
+          <div className="member-actions">
+            <button
+              disabled={submitting !== undefined}
+              onClick={() => void previewTarget()}
+              type="button"
+            >
+              Preview extraction
+            </button>
+            <button disabled={submitting !== undefined} type="submit">
+              Save target
+            </button>
+            <button
+              disabled={submitting !== undefined}
+              onClick={() => {
+                setTargetMonitor(undefined);
+                setTargetPreview(undefined);
+              }}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <h2 className="totp-panel">Your monitors</h2>
       {state.monitors.length === 0 ? (
         <p className="account-intro">No monitor configurations yet.</p>
@@ -1349,6 +1569,13 @@ function MonitorManagement() {
                 <p>Created {formatDate(monitor.createdAt)}</p>
               </div>
               <div className="member-actions">
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => void openTarget(monitor)}
+                  type="button"
+                >
+                  Extraction
+                </button>
                 <button
                   disabled={submitting !== undefined}
                   onClick={() => void openSchedule(monitor)}
@@ -2039,8 +2266,8 @@ function App() {
           Local owner onboarding now sends one-time verification links to development-only Mailpit.
           Production verification and password-reset provider delivery remain deferred.
           Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
-          available. Monitor configuration and scheduling are ready; extraction controls follow
-          next.
+          available. Monitor configuration, scheduling, and safe extraction previews are ready;
+          repeated-list detection follows next.
         </p>
       </section>
 

@@ -145,10 +145,19 @@ to that session's user ID. A caller cannot read or mutate another account's moni
 - `DELETE /api/v1/monitors/{monitorId}/schedule` requires `If-Match`, removes the schedule, and also increments the
   monitor revision. A schedule is never written directly to Redis; the scheduler reconciles the committed MariaDB
   record into BullMQ.
+- `GET /api/v1/monitors/{monitorId}/target` returns the owned monitor and extraction target, defaulting existing
+  monitors to `whole_page`. `PUT /api/v1/monitors/{monitorId}/target` requires `If-Match`, accepts either
+  `whole_page` or a bounded valid CSS selector, and atomically increments the monitor revision with its MariaDB
+  target record. It also synchronizes any schedule revision before reconciliation.
+- `POST /api/v1/monitors/{monitorId}/target/preview` accepts an unsaved target configuration and returns bounded
+  text-only extraction from that owned monitor's existing URL. It never persists the preview request, accepts no
+  alternate URL or credentials, is rate-limited per requester, and returns only generic errors for rejected
+  destinations or failed/unsupported pages.
 
 Names are trimmed and bounded, and URLs must be absolute HTTP(S) values without embedded credentials or fragments.
-These routes store configuration only; they do not fetch the target. DNS resolution, private-network rejection,
-redirect handling, response limits, and all outbound-request enforcement are delivered by Phase 4's SSRF-safe fetcher.
+Monitor CRUD and schedule routes store configuration only. The extraction-preview route is the narrowly scoped
+exception: it validates every initial and redirect destination, rejects private/reserved addresses, disables response
+compression, bounds bytes/time/redirects, and returns text only. Scheduled fetching remains a Phase 4 worker concern.
 
 Outbound email delivery is deliberately deferred to Phase 5. Verification and password-reset flows store only token
 hashes and do not return a recoverable plaintext token. Account deletion is the narrowly scoped exception: its recovery

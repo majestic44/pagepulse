@@ -18,6 +18,7 @@
     "@pagepulse/config": "workspace:*",
     "@pagepulse/contracts": "workspace:*",
     "@pagepulse/db": "workspace:*",
+    "@pagepulse/monitor-engine": "workspace:*",
     "@pagepulse/queue": "workspace:*",
     "@sinclair/typebox": "^0.34.41",
     "fastify": "^5.6.2",

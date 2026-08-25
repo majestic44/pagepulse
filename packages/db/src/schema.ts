@@ -224,6 +224,17 @@ export const monitorSchedules = mysqlTable(
   (table) => [index('monitor_schedules_revision_idx').on(table.monitorRevision)],
 );
 
+export const monitorTargets = mysqlTable('monitor_targets', {
+  monitorId: varchar('monitor_id', { length: 36 })
+    .primaryKey()
+    .references(() => monitors.id, { onDelete: 'cascade' }),
+  targetType: mysqlEnum('target_type', ['whole_page', 'css_selector'])
+    .notNull()
+    .default('whole_page'),
+  selector: varchar('selector', { length: 512 }),
+  updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+});
+
 export const outboxEvents = mysqlTable(
   'outbox_events',
   {

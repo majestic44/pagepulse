@@ -3,17 +3,21 @@ import {
   deleteOwnedMonitorSchedule,
   deleteMonitor,
   getMonitorSchedule,
+  getMonitorTarget,
   getMonitor,
   listMonitors,
   pauseMonitor,
   resumeMonitor,
   upsertOwnedMonitorSchedule,
+  upsertOwnedMonitorTarget,
   updateMonitor,
   type Monitor,
   type MonitorConfiguration,
   type MonitorPool,
   type MonitorScheduleConfiguration,
   type MonitorScheduleWithMonitor,
+  type MonitorTargetConfiguration,
+  type MonitorTargetWithMonitor,
   withMonitorTransaction,
 } from '@pagepulse/db';
 
@@ -26,6 +30,10 @@ export type MonitorService = Readonly<{
     userId: string,
     monitorId: string,
   ) => Promise<Awaited<ReturnType<typeof getMonitorSchedule>>>;
+  getTarget: (
+    userId: string,
+    monitorId: string,
+  ) => Promise<Awaited<ReturnType<typeof getMonitorTarget>>>;
   list: (userId: string) => Promise<ReadonlyArray<Monitor>>;
   pause: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
   resume: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
@@ -41,6 +49,12 @@ export type MonitorService = Readonly<{
     expectedRevision: number,
     configuration: MonitorScheduleConfiguration,
   ) => Promise<MonitorScheduleWithMonitor>;
+  updateTarget: (
+    userId: string,
+    monitorId: string,
+    expectedRevision: number,
+    configuration: MonitorTargetConfiguration,
+  ) => Promise<MonitorTargetWithMonitor>;
 }>;
 
 export type MonitorServiceOptions = Readonly<{
@@ -71,6 +85,8 @@ export function createMonitorService({
       withMonitorTransaction(pool, (connection) =>
         getMonitorSchedule(connection, userId, monitorId),
       ),
+    getTarget: (userId, monitorId) =>
+      withMonitorTransaction(pool, (connection) => getMonitorTarget(connection, userId, monitorId)),
     list: (userId) =>
       withMonitorTransaction(pool, (connection) => listMonitors(connection, userId)),
     pause: (userId, monitorId, expectedRevision) =>
@@ -88,6 +104,10 @@ export function createMonitorService({
     updateSchedule: (userId, monitorId, expectedRevision, configuration) =>
       withMonitorTransaction(pool, (connection) =>
         upsertOwnedMonitorSchedule(connection, userId, monitorId, expectedRevision, configuration),
+      ),
+    updateTarget: (userId, monitorId, expectedRevision, configuration) =>
+      withMonitorTransaction(pool, (connection) =>
+        upsertOwnedMonitorTarget(connection, userId, monitorId, expectedRevision, configuration),
       ),
   };
 }

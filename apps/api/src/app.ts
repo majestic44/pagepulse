@@ -27,10 +27,12 @@ import {
   MonitorScheduleNotFoundError,
   MonitorScheduleValidationError,
   MonitorStateError,
+  MonitorTargetValidationError,
   probeDatabase,
   type ActiveSession,
   type Monitor,
   type MonitorSchedule,
+  type MonitorTarget,
 } from '@pagepulse/db';
 import {
   AccountDeletionConflictResponse,
@@ -48,6 +50,7 @@ import {
   HealthResponse,
   InvalidMonitorRequestResponse,
   InvalidMonitorScheduleRequestResponse,
+  InvalidMonitorTargetRequestResponse,
   InvalidAuthenticationRequestResponse,
   InvalidAccountDeletionConfirmationResponse,
   LoginRequest,
@@ -62,7 +65,11 @@ import {
   MonitorScheduleConfiguration,
   MonitorScheduleResponse,
   MonitorSummary,
+  MonitorTargetConfiguration,
+  MonitorTargetPreviewResponse,
+  MonitorTargetResponse,
   MonitorsResponse,
+  MonitorPreviewFailureResponse,
   MonitorUnavailableResponse,
   NotFoundResponse,
   PasswordResetRequest,
@@ -74,9 +81,16 @@ import {
   TotpProofRequest,
   TotpStatusResponse,
   TooManyRequestsResponse,
+  TooManyMonitorPreviewRequestsResponse,
   UnauthorizedResponse,
   VersionResponse,
 } from '@pagepulse/contracts';
+import {
+  MonitorPreviewError,
+  previewHtmlTarget,
+  type HtmlExtractionPreview,
+  type MonitorTargetConfiguration as MonitorTargetConfigurationInput,
+} from '@pagepulse/monitor-engine';
 import { createRedisConnection, probeRedis } from '@pagepulse/queue';
 import { createAccountDeletionService } from './account-deletion.js';
 import { createAuditService } from './audit.js';
@@ -107,7 +121,15 @@ export type BuildAppOptions = Readonly<{
   authentication?: AuthenticationDependencies;
   environment?: Environment;
   healthService?: HealthService;
+  monitorPreview?: MonitorPreviewService;
   now?: () => number;
+}>;
+
+export type MonitorPreviewService = Readonly<{
+  preview: (
+    monitor: Monitor,
+    target: MonitorTargetConfigurationInput,
+  ) => Promise<HtmlExtractionPreview>;
 }>;
 
 type DefaultAuthenticationDependencies = AuthenticationDependencies &
@@ -128,6 +150,10 @@ function authenticationRateLimitPolicies(
     login: {
       limit: environment.AUTH_LOGIN_RATE_LIMIT_MAX,
       windowMs: environment.AUTH_LOGIN_RATE_LIMIT_WINDOW_MS,
+    },
+    preview: {
+      limit: environment.MONITOR_PREVIEW_RATE_LIMIT_MAX,
+      windowMs: environment.MONITOR_PREVIEW_RATE_LIMIT_WINDOW_MS,
     },
     totp: {
       limit: environment.AUTH_TOTP_RATE_LIMIT_MAX,
@@ -204,6 +230,16 @@ export async function buildApp(options: BuildAppOptions = {}) {
       database: () => probeDatabase(env.DATABASE_URL),
       redis: () => probeRedis(env.REDIS_URL),
     });
+  const monitorPreview: MonitorPreviewService = options.monitorPreview ?? {
+    preview: (monitor, target) =>
+      previewHtmlTarget(
+        { target, url: monitor.url },
+        {
+          maxBytes: Math.min(env.HTTP_FETCH_MAX_BYTES, 512 * 1_024),
+          timeoutMs: env.HTTP_FETCH_TIMEOUT_MS,
+        },
+      ),
+  };
   let defaultAuthentication: DefaultAuthenticationDependencies | undefined;
   let defaultAuthenticationPromise: Promise<DefaultAuthenticationDependencies> | undefined;
   const getAuthentication = async () => {
@@ -263,6 +299,13 @@ export async function buildApp(options: BuildAppOptions = {}) {
       code: (statusCode: number) => { send: (payload: unknown) => unknown };
       header: (name: string, value: string) => unknown;
     },
+    errors: Readonly<{
+      tooMany: string;
+      unavailable: string;
+    }> = {
+      tooMany: 'Too many authentication attempts',
+      unavailable: 'Authentication temporarily unavailable',
+    },
   ): Promise<AuthenticationDependencies | undefined> {
     const authentication = await getAuthentication();
     try {
@@ -276,11 +319,11 @@ export async function buildApp(options: BuildAppOptions = {}) {
     } catch (error) {
       if (error instanceof AuthRateLimitExceededError) {
         reply.header('Retry-After', String(error.retryAfterSeconds));
-        reply.code(429).send({ error: 'Too many authentication attempts' });
+        reply.code(429).send({ error: errors.tooMany });
         return undefined;
       }
       if (error instanceof AuthRateLimitUnavailableError) {
-        reply.code(503).send({ error: 'Authentication temporarily unavailable' });
+        reply.code(503).send({ error: errors.unavailable });
         return undefined;
       }
       throw error;
@@ -320,6 +363,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     hourlyMinute: schedule.hourlyMinute,
     scheduleType: schedule.scheduleType,
     timeZone: schedule.timeZone,
+  });
+  const serializeMonitorTarget = (target: MonitorTarget) => ({
+    selector: target.selector,
+    targetType: target.targetType,
   });
   const auditContext = (request: FastifyRequest) => ({
     requesterIpHash: hashAuditRequesterIp(request.ip),
@@ -365,7 +412,13 @@ export async function buildApp(options: BuildAppOptions = {}) {
   } as const;
   const invalidMonitorResponse = { error: 'Invalid monitor request' } as const;
   const invalidMonitorScheduleResponse = { error: 'Invalid monitor schedule' } as const;
+  const invalidMonitorTargetResponse = { error: 'Invalid monitor target' } as const;
   const monitorLimitResponse = { error: 'Monitor limit reached' } as const;
+  const monitorPreviewTargetNotAllowedResponse = {
+    error: 'Preview target is not allowed',
+  } as const;
+  const monitorPreviewUnavailableResponse = { error: 'Preview unavailable' } as const;
+  const tooManyMonitorPreviewRequestsResponse = { error: 'Too many preview attempts' } as const;
   const monitorRevisionConflictResponse = { error: 'Monitor has changed' } as const;
   const monitorStateConflictResponse = { error: 'Monitor state cannot be changed' } as const;
   const monitorUnavailableResponse = {
@@ -396,6 +449,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
     }
     if (error instanceof MonitorScheduleValidationError) {
       return reply.code(400).send(invalidMonitorScheduleResponse);
+    }
+    if (error instanceof MonitorTargetValidationError) {
+      return reply.code(400).send(invalidMonitorTargetResponse);
     }
     if (error instanceof MonitorLimitError) {
       return reply.code(409).send(monitorLimitResponse);
@@ -1263,6 +1319,134 @@ export async function buildApp(options: BuildAppOptions = {}) {
           schedule: null,
         });
       } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/target',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorTargetResponse,
+          400: InvalidMonitorTargetRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const result = await current.authentication.monitors.getTarget(
+          current.session.userId,
+          request.params.monitorId,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          target: serializeMonitorTarget(result.target),
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.put<{ Body: Static<typeof MonitorTargetConfiguration>; Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/target',
+    {
+      schema: {
+        body: MonitorTargetConfiguration,
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorTargetResponse,
+          400: InvalidMonitorTargetRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorTargetResponse);
+      }
+      try {
+        const result = await current.authentication.monitors.updateTarget(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+          request.body,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          target: serializeMonitorTarget(result.target),
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Body: Static<typeof MonitorTargetConfiguration>; Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/target/preview',
+    {
+      schema: {
+        body: MonitorTargetConfiguration,
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorTargetPreviewResponse,
+          400: InvalidMonitorTargetRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          422: MonitorPreviewFailureResponse,
+          429: TooManyMonitorPreviewRequestsResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const authentication = await getRateLimitedAuthentication('preview', request.ip, reply, {
+        tooMany: tooManyMonitorPreviewRequestsResponse.error,
+        unavailable: monitorUnavailableResponse.error,
+      });
+      if (!authentication) {
+        return reply;
+      }
+      try {
+        const monitor = await authentication.monitors.get(
+          current.session.userId,
+          request.params.monitorId,
+        );
+        return { preview: await monitorPreview.preview(monitor, request.body) };
+      } catch (error) {
+        if (error instanceof MonitorTargetValidationError) {
+          return reply.code(400).send(invalidMonitorTargetResponse);
+        }
+        if (error instanceof MonitorPreviewError) {
+          return error.code === 'destination_not_allowed'
+            ? reply.code(422).send(monitorPreviewTargetNotAllowedResponse)
+            : reply.code(422).send(monitorPreviewUnavailableResponse);
+        }
         return sendMonitorError(reply, error);
       }
     },
