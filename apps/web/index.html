@@ -6,6 +6,23 @@
     <meta name="theme-color" content="#087f83" />
     <meta name="description" content="PagePulse webpage change monitoring" />
     <title>PagePulse</title>
+    <script>
+      (() => {
+        try {
+          const preference = localStorage.getItem('pagepulse-theme-preference');
+          const systemTheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          const theme = preference === 'light' || preference === 'dark' ? preference : systemTheme;
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.dataset.themePreference =
+            preference === 'light' || preference === 'dark' || preference === 'system'
+              ? preference
+              : 'system';
+          document.documentElement.style.colorScheme = theme;
+        } catch {
+          // Rendering continues with the stylesheet's light-token fallback.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

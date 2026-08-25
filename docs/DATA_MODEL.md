@@ -2,7 +2,8 @@
 
 ## Identity and authorization
 
-- `users`: email, password hash, verification state, timezone, theme, status, deletion-request timestamp, and deletion deadline.
+- `users`: email, password hash, verification state, status, deletion-request timestamp, and deletion deadline.
+  Theme is currently a browser-local preference (light, dark, or system), so it is not part of the server-side user record.
 - Member lifecycle uses the existing `users.status`: an owner may move an active member to `suspended` and later
   restore that same member to `active`; owner-targeted lifecycle actions are rejected. Owner removal permanently
   deletes a member and cascades member-owned records after revoking active sessions.

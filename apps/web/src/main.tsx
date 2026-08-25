@@ -1,8 +1,151 @@
-import { StrictMode, useCallback, useEffect, useState, type FormEvent } from 'react';
+import {
+  StrictMode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
 type Theme = 'light' | 'dark';
+type ThemePreference = Theme | 'system';
+
+const themeStorageKey = 'pagepulse-theme-preference';
+
+type ThemeContextValue = Readonly<{
+  preference: ThemePreference | null;
+  resolvedTheme: Theme;
+  selectTheme: (preference: ThemePreference) => void;
+}>;
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+function readThemePreference(): ThemePreference | null {
+  try {
+    const value = window.localStorage.getItem(themeStorageKey);
+    return value === 'light' || value === 'dark' || value === 'system' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveTheme(preference: ThemePreference | null, systemTheme: Theme): Theme {
+  return preference === 'light' || preference === 'dark' ? preference : systemTheme;
+}
+
+function getSystemTheme(): Theme {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function useThemePreference() {
+  const [preference, setPreference] = useState<ThemePreference | null>(readThemePreference);
+  const [systemTheme, setSystemTheme] = useState<Theme>(getSystemTheme);
+  const resolvedTheme = resolveTheme(preference, systemTheme);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const updateSystemTheme = () => setSystemTheme(mediaQuery.matches ? 'dark' : 'light');
+    updateSystemTheme();
+    mediaQuery.addEventListener('change', updateSystemTheme);
+    return () => mediaQuery.removeEventListener('change', updateSystemTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.themePreference = preference ?? 'system';
+    document.documentElement.style.colorScheme = resolvedTheme;
+  }, [preference, resolvedTheme]);
+
+  const selectTheme = useCallback((nextPreference: ThemePreference) => {
+    setPreference(nextPreference);
+    try {
+      window.localStorage.setItem(themeStorageKey, nextPreference);
+    } catch {
+      // Keep the current browser session usable when storage is unavailable.
+    }
+  }, []);
+
+  return { preference, resolvedTheme, selectTheme };
+}
+
+function useTheme() {
+  const value = useContext(ThemeContext);
+  if (!value) {
+    throw new Error('Theme controls must be rendered inside ThemeProvider');
+  }
+  return value;
+}
+
+function ThemeControl() {
+  const { preference, resolvedTheme, selectTheme } = useTheme();
+
+  return (
+    <label className="theme-control">
+      <span>Theme</span>
+      <select
+        aria-label="Color theme"
+        onChange={(event) => selectTheme(event.target.value as ThemePreference)}
+        value={preference ?? 'system'}
+      >
+        <option value="system">System ({resolvedTheme})</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+  );
+}
+
+function ThemeSelectionDialog() {
+  const { selectTheme } = useTheme();
+
+  return (
+    <div className="theme-dialog-backdrop">
+      <section
+        aria-describedby="theme-choice-description"
+        aria-labelledby="theme-choice-title"
+        aria-modal="true"
+        className="theme-dialog"
+        role="dialog"
+      >
+        <p className="eyebrow">DISPLAY PREFERENCE</p>
+        <h2 id="theme-choice-title">Choose a theme</h2>
+        <p id="theme-choice-description">
+          You can change this later. System follows your device and updates when its appearance
+          changes.
+        </p>
+        <div className="theme-option-grid">
+          <button autoFocus onClick={() => selectTheme('system')} type="button">
+            <strong>System</strong>
+            <span>Follow this device</span>
+          </button>
+          <button onClick={() => selectTheme('light')} type="button">
+            <strong>Light</strong>
+            <span>Always use the light theme</span>
+          </button>
+          <button onClick={() => selectTheme('dark')} type="button">
+            <strong>Dark</strong>
+            <span>Always use the dark theme</span>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const theme = useThemePreference();
+
+  return (
+    <ThemeContext.Provider value={theme}>
+      {children}
+      {theme.preference === null ? <ThemeSelectionDialog /> : null}
+    </ThemeContext.Provider>
+  );
+}
 
 const milestones = [
   {
@@ -2574,13 +2717,6 @@ function EmailVerification({ initialToken }: Readonly<{ initialToken: string }>)
 }
 
 function App() {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem('pagepulse-theme') as Theme | null) ?? 'light',
-  );
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('pagepulse-theme', theme);
-  }, [theme]);
   return (
     <main className="shell">
       <header>
@@ -2602,9 +2738,7 @@ function App() {
         <a className="account-link" href="/account/deletion/recover">
           Recover deletion
         </a>
-        <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
-          Use {theme === 'light' ? 'dark' : 'light'} theme
-        </button>
+        <ThemeControl />
       </header>
       <section className="hero" aria-labelledby="page-title">
         <p className="eyebrow">PROJECT STATUS · AUGUST 2026</p>
@@ -2674,6 +2808,8 @@ const Page =
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Page />
+    <ThemeProvider>
+      <Page />
+    </ThemeProvider>
   </StrictMode>,
 );
