@@ -42,6 +42,15 @@ export {
   normalizeMonitorText,
   normalizeMonitorUrl,
 } from './normalization.js';
+export { evaluateMonitorRules, extractListingItems, ListingIdentityError } from './rule-engine.js';
+export type {
+  EvaluateMonitorRulesInput,
+  ExtractListingItemsOptions,
+  ListingIdentityKind,
+  ListingItem,
+  MonitorRuleEvaluation,
+  RuleMatch,
+} from './rule-engine.js';
 export type {
   CanonicalHtmlSource,
   CanonicalJsonSource,

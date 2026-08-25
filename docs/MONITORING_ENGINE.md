@@ -54,10 +54,10 @@ persist HTML or add any fetched content to a queue.
 ## Rule evaluation
 
 - `text-change`: canonical previous hash differs from current hash.
-- `new-item`: extract repeated items; identity priority is website ID → canonical URL → title/location/content fingerprint.
+- `new-item`: extract repeated items; identity priority is website ID → canonical URL → title/location/content fingerprint. Each identity is stored as a SHA-256 digest so rule evaluation never needs to emit the source value.
 - `keyword`: normalized token/phrase transitions from absent to present or present to absent.
 
-Rules are pure, versioned functions with fixture tests. Members can configure text-change and new-item rules plus up
+Rules are pure, deterministic functions with fixture tests. A first successful source establishes a baseline and produces no match; subsequent evaluations compare canonical hashes, stable listing identities, and normalized literal keyword transitions. Members can configure text-change and new-item rules plus up
 to 25 normalized keyword phrases that alert when they appear or disappear. A saved rule revision resets to a pending
 baseline; the first successful check establishes that new baseline and does not alert immediately unless the member
 explicitly requests a test.
