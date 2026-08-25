@@ -43,8 +43,15 @@ its loopback-only web UI can be published on the host; it remains absent from pr
 4. Worker loads the current monitor revision, rejects stale/paused jobs, validates the destination, and fetches within limits.
 
 Monitor CRUD exists before scheduling: a newly created monitor has no `monitor_schedules` row until its Phase 3
-schedule is configured. Pausing or revising a monitor increments its revision, so the reconciliation query excludes any
-older schedule record without relying on Redis as state authority. 5. Worker writes a bounded raw snapshot to the private volume and enqueues a reference for `change-detection`. 6. Change worker normalizes, extracts identities, evaluates rules, and commits check/event/snapshot metadata in MariaDB. 7. A transactional outbox produces notification jobs after commit. 8. Notification worker applies cooldown, quiet hours and digest rules, then records every delivery attempt. 9. Maintenance removes expired files/rows and detects missing or orphaned artifacts.
+schedule is configured. A monitor or schedule change increments the monitor revision and updates the committed schedule
+revision in the same MariaDB transaction; paused monitors are excluded from reconciliation. This prevents stale jobs
+without relying on Redis as state authority.
+
+5. Worker writes a bounded raw snapshot to the private volume and enqueues a reference for `change-detection`.
+6. Change worker normalizes, extracts identities, evaluates rules, and commits check/event/snapshot metadata in MariaDB.
+7. A transactional outbox produces notification jobs after commit.
+8. Notification worker applies cooldown, quiet hours and digest rules, then records every delivery attempt.
+9. Maintenance removes expired files/rows and detects missing or orphaned artifacts.
 
 ## Consistency
 

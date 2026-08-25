@@ -348,6 +348,36 @@ export const MonitorSummary = Type.Object({
   url: Type.String({ minLength: 1, maxLength: 2_048 }),
 });
 
+export const MonitorScheduleType = Type.Union([
+  Type.Literal('custom'),
+  Type.Literal('daily'),
+  Type.Literal('hourly'),
+]);
+
+export const MonitorScheduleConfiguration = Type.Object(
+  {
+    customIntervalMinutes: Type.Optional(Type.Integer({ minimum: 60, maximum: 35_791 })),
+    dailyTime: Type.Optional(Type.String({ minLength: 5, maxLength: 5 })),
+    hourlyMinute: Type.Optional(Type.Integer({ minimum: 0, maximum: 59 })),
+    scheduleType: MonitorScheduleType,
+    timeZone: Type.String({ minLength: 1, maxLength: 64 }),
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorScheduleSummary = Type.Object({
+  customIntervalMinutes: Type.Union([Type.Integer({ minimum: 60, maximum: 35_791 }), Type.Null()]),
+  dailyTime: Type.Union([Type.String({ minLength: 5, maxLength: 5 }), Type.Null()]),
+  hourlyMinute: Type.Union([Type.Integer({ minimum: 0, maximum: 59 }), Type.Null()]),
+  scheduleType: MonitorScheduleType,
+  timeZone: Type.String({ minLength: 1, maxLength: 64 }),
+});
+
+export const MonitorScheduleResponse = Type.Object({
+  monitor: MonitorSummary,
+  schedule: Type.Union([MonitorScheduleSummary, Type.Null()]),
+});
+
 export const MonitorsResponse = Type.Object({
   monitors: Type.Array(MonitorSummary),
 });
@@ -358,6 +388,10 @@ export const MonitorIdParameters = Type.Object({
 
 export const InvalidMonitorRequestResponse = Type.Object({
   error: Type.Literal('Invalid monitor request'),
+});
+
+export const InvalidMonitorScheduleRequestResponse = Type.Object({
+  error: Type.Literal('Invalid monitor schedule'),
 });
 
 export const MonitorLimitResponse = Type.Object({

@@ -6,6 +6,7 @@ export * from './health.js';
 export * from './migrate.js';
 export * from './members.js';
 export * from './monitors.js';
+export * from './monitor-scheduling.js';
 export * from './owner-bootstrap.js';
 export * from './outbox.js';
 export * from './schedules.js';

@@ -210,6 +210,13 @@ export const monitorSchedules = mysqlTable(
       .references(() => monitors.id, { onDelete: 'cascade' }),
     monitorRevision: int('monitor_revision').notNull(),
     intervalMs: int('interval_ms').notNull(),
+    scheduleType: mysqlEnum('schedule_type', ['hourly', 'daily', 'custom'])
+      .notNull()
+      .default('custom'),
+    timeZone: varchar('time_zone', { length: 64 }).notNull().default('UTC'),
+    hourlyMinute: int('hourly_minute'),
+    dailyTime: varchar('daily_time', { length: 5 }),
+    customIntervalMinutes: int('custom_interval_minutes'),
     correlationId: varchar('correlation_id', { length: 128 }).notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),

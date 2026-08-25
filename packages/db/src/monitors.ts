@@ -209,6 +209,17 @@ function requireRevision(monitor: Monitor, expectedRevision: number) {
   }
 }
 
+async function synchronizeMonitorScheduleRevision(
+  connection: Pick<MonitorConnection, 'query'>,
+  monitorId: string,
+  revision: number,
+) {
+  await connection.query('UPDATE monitor_schedules SET monitor_revision = ? WHERE monitor_id = ?', [
+    revision,
+    monitorId,
+  ]);
+}
+
 export async function withMonitorTransaction<T>(
   pool: MonitorPool,
   operation: (connection: MonitorConnection) => Promise<T>,
@@ -337,6 +348,7 @@ export async function updateMonitor(
      WHERE id = ? AND owner_id = ? AND revision = ?`,
     [normalized.name, normalized.url, revision, monitor.id, ownerId, monitor.revision],
   );
+  await synchronizeMonitorScheduleRevision(connection, monitor.id, revision);
   return { ...monitor, ...normalized, revision };
 }
 
@@ -362,6 +374,7 @@ async function transitionMonitor(
      WHERE id = ? AND owner_id = ? AND revision = ?`,
     [to, revision, monitor.id, ownerId, monitor.revision],
   );
+  await synchronizeMonitorScheduleRevision(connection, monitor.id, revision);
   return { ...monitor, revision, state: to };
 }
 

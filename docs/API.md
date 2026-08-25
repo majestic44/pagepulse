@@ -136,7 +136,15 @@ to that session's user ID. A caller cannot read or mutate another account's moni
   `If-Match: "<revision>"` precondition. Reads and successful writes emit the latest revision as an `ETag`.
   Stale updates return `409 { "error": "Monitor has changed" }` rather than overwriting a newer configuration.
 - Pause is valid only from `active`; resume is valid only from `paused`. Each successful mutation increments the
-  monitor revision, making any prior scheduling record stale until Phase 3 scheduling is implemented.
+  monitor revision and synchronizes any existing schedule to that new revision before scheduler reconciliation.
+- `GET /api/v1/monitors/{monitorId}/schedule` returns the owned monitor plus its schedule configuration, if one is
+  configured. It emits the monitor revision as an `ETag`.
+- `PUT /api/v1/monitors/{monitorId}/schedule` accepts an hourly local minute, a daily `HH:MM` local time, or a custom
+  whole-minute interval. It requires `If-Match`, validates an IANA time zone, enforces a 60-minute minimum for custom
+  intervals, and increments the monitor revision atomically with the MariaDB schedule record.
+- `DELETE /api/v1/monitors/{monitorId}/schedule` requires `If-Match`, removes the schedule, and also increments the
+  monitor revision. A schedule is never written directly to Redis; the scheduler reconciles the committed MariaDB
+  record into BullMQ.
 
 Names are trimmed and bounded, and URLs must be absolute HTTP(S) values without embedded credentials or fragments.
 These routes store configuration only; they do not fetch the target. DNS resolution, private-network rejection,

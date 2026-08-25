@@ -55,6 +55,8 @@ Rules are pure, versioned functions with fixture tests. A rule revision establis
 - Jobs include jitter to avoid synchronized checks.
 - Missed runs collapse into one catch-up check rather than a burst.
 
-The Phase 1 scheduler foundation stores a bounded interval and monitor revision in MariaDB, then uses deterministic
-BullMQ Job Scheduler IDs during reconciliation. Phase 3 will extend this internal registry with member-selected
-hourly/daily/custom schedules, IANA timezones and DST-safe resolution rather than changing Redis directly.
+MariaDB stores the member-selected schedule definition and the monitor revision; Redis is rebuilt from that committed
+state during reconciliation. Hourly schedules compile to a timezone-aware cron pattern at the selected local minute,
+daily schedules compile to the selected local `HH:MM`, and custom schedules use a fixed whole-minute interval of at
+least one hour. BullMQ/cron-parser receives the IANA time zone for calendar schedules, so daylight-saving transitions
+are resolved by the scheduler instead of application-side timestamp arithmetic.

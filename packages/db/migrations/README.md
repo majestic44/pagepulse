@@ -14,5 +14,6 @@ Drizzle migrations in this directory are forward-only in production. Apply them 
 | `0005_brown_microbe`             | Additive only. Disable TOTP routes and restore a verified pre-migration backup if factor records must be removed; do not drop the tables in production.                                                                    |
 | `0006_account-deletion-recovery` | Additive only. Disable account-deletion routes and the maintenance sweep, then restore a verified pre-migration backup if deletion state must be removed; do not drop user columns or narrow the token enum in production. |
 | `0007_tricky_tusk`               | Additive only. Disable audit writes, owner audit access, and audit retention cleanup, then restore a verified pre-migration backup if the audit table must be removed; do not drop audit history in production.            |
+| `0008_stale_jetstream`           | Additive only. Disable scheduler reconciliation and restore a verified pre-migration backup if the schedule metadata must be removed; do not drop the added columns from a live production database.                       |
 
 For later destructive schema changes, use expand/migrate/contract across releases and add a restore or rollback note to this table.

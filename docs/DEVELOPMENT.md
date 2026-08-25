@@ -21,8 +21,10 @@ the direct value and its `_FILE` form. Logs are structured JSON and redact sensi
 The scheduler reconciles MariaDB-backed monitor schedules and pending outbox rows every five minutes by default.
 
 After signing in locally, visit `http://localhost:8080/monitors` to exercise monitor configuration. The page supports
-creation, revision-protected edits, pause/resume, and deletion for the signed-in account. It records target URLs but
-does not fetch them; outbound SSRF protections arrive with the HTTP monitoring engine.
+creation, revision-protected edits, pause/resume, deletion, and hourly/daily/custom schedule configuration for the
+signed-in account. Calendar schedules require an IANA time zone and are reconciled through BullMQ with DST-aware cron
+patterns; custom intervals are never shorter than 60 minutes. It records target URLs but does not fetch them; outbound
+SSRF protections arrive with the HTTP monitoring engine.
 Set `SCHEDULER_RECONCILIATION_INTERVAL_MS` to a value between 60 seconds and one hour when a different recovery
 cadence is needed.
 

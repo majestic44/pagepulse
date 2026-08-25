@@ -60,11 +60,26 @@ function createAuthenticationDependencies(
     monitors: {
       create: vi.fn().mockResolvedValue(monitor),
       delete: vi.fn().mockResolvedValue(undefined),
+      deleteSchedule: vi.fn().mockResolvedValue({ ...monitor, revision: 2 }),
       get: vi.fn().mockResolvedValue(monitor),
+      getSchedule: vi.fn().mockResolvedValue({ monitor, schedule: null }),
       list: vi.fn().mockResolvedValue([monitor]),
       pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
       resume: vi.fn().mockResolvedValue(monitor),
       update: vi.fn().mockResolvedValue({ ...monitor, name: 'Updated monitor', revision: 2 }),
+      updateSchedule: vi.fn().mockResolvedValue({
+        monitor: { ...monitor, revision: 2 },
+        schedule: {
+          correlationId: 'schedule-correlation-id',
+          customIntervalMinutes: 60,
+          dailyTime: null,
+          hourlyMinute: null,
+          monitorId: monitor.id,
+          monitorRevision: 2,
+          scheduleType: 'custom' as const,
+          timeZone: 'UTC',
+        },
+      }),
       ...monitors,
     },
     emailDelivery: {
@@ -891,6 +906,125 @@ describe('authentication contract', () => {
     expect(stale.statusCode).toBe(409);
     expect(stale.json()).toEqual({ error: 'Monitor has changed' });
     expect(authentication.monitors.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a member configure, read, and remove a timezone-aware monitor schedule', async () => {
+    const scheduledMonitor = { ...monitor, revision: 2 };
+    const schedule = {
+      correlationId: 'schedule-correlation-id',
+      customIntervalMinutes: null,
+      dailyTime: '09:30',
+      hourlyMinute: null,
+      monitorId: monitor.id,
+      monitorRevision: 2,
+      scheduleType: 'daily' as const,
+      timeZone: 'America/New_York',
+    };
+    const monitors: Partial<MonitorService> = {
+      deleteSchedule: vi.fn().mockResolvedValue({ ...scheduledMonitor, revision: 3 }),
+      getSchedule: vi.fn().mockResolvedValue({ monitor, schedule: null }),
+      updateSchedule: vi.fn().mockResolvedValue({ monitor: scheduledMonitor, schedule }),
+    };
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      monitors,
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const fetched = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/monitors/monitor-id/schedule',
+      headers: { cookie },
+    });
+    const configured = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id/schedule',
+      headers: { cookie, 'if-match': '"1"' },
+      payload: { dailyTime: '09:30', scheduleType: 'daily', timeZone: 'America/New_York' },
+    });
+    const removed = await testApp.inject({
+      method: 'DELETE',
+      url: '/api/v1/monitors/monitor-id/schedule',
+      headers: { cookie, 'if-match': '"2"' },
+    });
+
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.headers.etag).toBe('"1"');
+    expect(fetched.json()).toEqual({
+      monitor: {
+        createdAt: '2026-08-24T00:00:00.000Z',
+        id: 'monitor-id',
+        name: 'Career openings',
+        revision: 1,
+        state: 'active',
+        url: 'https://example.test/jobs',
+      },
+      schedule: null,
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.headers.etag).toBe('"2"');
+    expect(configured.json()).toEqual({
+      monitor: {
+        createdAt: '2026-08-24T00:00:00.000Z',
+        id: 'monitor-id',
+        name: 'Career openings',
+        revision: 2,
+        state: 'active',
+        url: 'https://example.test/jobs',
+      },
+      schedule: {
+        customIntervalMinutes: null,
+        dailyTime: '09:30',
+        hourlyMinute: null,
+        scheduleType: 'daily',
+        timeZone: 'America/New_York',
+      },
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.headers.etag).toBe('"3"');
+    expect(authentication.monitors.updateSchedule).toHaveBeenCalledWith(
+      'member-id',
+      'monitor-id',
+      1,
+      {
+        dailyTime: '09:30',
+        scheduleType: 'daily',
+        timeZone: 'America/New_York',
+      },
+    );
+    expect(authentication.monitors.deleteSchedule).toHaveBeenCalledWith(
+      'member-id',
+      'monitor-id',
+      2,
+    );
+  });
+
+  it('rejects invalid schedule preconditions before calling monitor services', async () => {
+    const authentication = createAuthenticationDependencies({}, undefined, {
+      authenticate: vi.fn().mockResolvedValue(memberSession),
+    });
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id/schedule',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      payload: { dailyTime: '09:30', scheduleType: 'daily', timeZone: 'America/New_York' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Invalid monitor schedule' });
+    expect(authentication.monitors.updateSchedule).not.toHaveBeenCalled();
   });
 
   it('allows an owner to list and manage member lifecycle state', async () => {
