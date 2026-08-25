@@ -28,6 +28,23 @@ export type {
   SafeHttpResponse,
   SafeHttpTransport,
 } from './safe-http.js';
+export {
+  fetchMonitorSource,
+  parseHtmlSource,
+  parseJsonSource,
+  parseRssAtomSource,
+  SourceAdapterError,
+} from './source-adapters.js';
+export type {
+  FetchMonitorSourceOptions,
+  FeedSourceItem,
+  HtmlSource,
+  JsonSource,
+  JsonSourceValue,
+  MonitorSourceType,
+  ParsedMonitorSource,
+  RssAtomSource,
+} from './source-adapters.js';
 
 const MAXIMUM_SELECTOR_LENGTH = 512;
 const MAXIMUM_REPEATED_LIST_CANDIDATES = 6;
