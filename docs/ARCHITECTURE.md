@@ -71,7 +71,7 @@ into Redis.
 - The maintenance worker performs an immediate and then periodic MariaDB transaction that permanently deletes expired
   `deleting` member accounts and removes expired audit events in bounded batches. The `users.deletion_deadline` and
   `audit_events.expires_at` indexes drive selection; Redis is not part of either retention authority.
-- File writes use prepare → fsync → atomic rename; metadata commits only after a successful publish.
+- File writes use prepare → fsync → atomic non-overwriting publish; metadata commits only after a successful publish.
 
 ## Queue contracts
 

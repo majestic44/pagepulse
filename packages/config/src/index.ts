@@ -97,6 +97,9 @@ const environmentSchema = z
     HTTP_FETCH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(15_000),
     HTTP_FETCH_MAX_BYTES: z.coerce.number().int().min(1_024).max(100_000_000).default(5_242_880),
     DOMAIN_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
+    SNAPSHOT_ROOT: z.string().trim().min(1).max(1_024).default('/data/snapshots'),
+    SNAPSHOT_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+    CHECK_HISTORY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
     BROWSER_CONCURRENCY_MIN: z.coerce.number().int().min(1).max(16).default(1),
     BROWSER_CONCURRENCY_MAX: z.coerce.number().int().min(1).max(16).default(2),
     BROWSER_MEMORY_HIGH_WATERMARK_MB: z.coerce.number().int().min(256).max(65_536).default(7_000),
@@ -130,6 +133,13 @@ const environmentSchema = z
         code: 'custom',
         message: 'SESSION_IDLE_TTL_MINUTES must not exceed SESSION_ABSOLUTE_TTL_MINUTES',
         path: ['SESSION_IDLE_TTL_MINUTES'],
+      });
+    }
+    if (environment.SNAPSHOT_RETENTION_DAYS > environment.CHECK_HISTORY_RETENTION_DAYS) {
+      context.addIssue({
+        code: 'custom',
+        message: 'SNAPSHOT_RETENTION_DAYS must not exceed CHECK_HISTORY_RETENTION_DAYS',
+        path: ['SNAPSHOT_RETENTION_DAYS'],
       });
     }
     if (environment.NODE_ENV === 'production' && environment.APP_BASE_URL?.startsWith('http://')) {

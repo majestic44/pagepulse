@@ -38,6 +38,8 @@ x-app-environment: &app-environment
   ACCOUNT_DELETION_SWEEP_INTERVAL_MS: ${ACCOUNT_DELETION_SWEEP_INTERVAL_MS:-3600000}
   TOTP_ENCRYPTION_KEK: ${TOTP_ENCRYPTION_KEK:-replace-through-infisical}
   SNAPSHOT_ROOT: /data/snapshots
+  SNAPSHOT_RETENTION_DAYS: ${SNAPSHOT_RETENTION_DAYS:-7}
+  CHECK_HISTORY_RETENTION_DAYS: ${CHECK_HISTORY_RETENTION_DAYS:-30}
 
 x-app-service: &app-service
   restart: unless-stopped

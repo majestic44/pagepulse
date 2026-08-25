@@ -252,6 +252,53 @@ export const monitorRules = mysqlTable('monitor_rules', {
   updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
 });
 
+export const checks = mysqlTable(
+  'checks',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    monitorId: varchar('monitor_id', { length: 36 })
+      .notNull()
+      .references(() => monitors.id, { onDelete: 'cascade' }),
+    monitorRevision: int('monitor_revision').notNull(),
+    correlationId: varchar('correlation_id', { length: 128 }).notNull(),
+    result: mysqlEnum('result', ['succeeded', 'failed']).notNull(),
+    failureCode: varchar('failure_code', { length: 64 }),
+    contentHash: varchar('content_hash', { length: 64 }),
+    startedAt: timestamp('started_at').notNull(),
+    completedAt: timestamp('completed_at').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => [
+    index('checks_monitor_completed_idx').on(table.monitorId, table.completedAt),
+    index('checks_expiry_idx').on(table.expiresAt, table.id),
+  ],
+);
+
+export const snapshots = mysqlTable(
+  'snapshots',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    checkId: varchar('check_id', { length: 36 })
+      .notNull()
+      .unique()
+      .references(() => checks.id, { onDelete: 'cascade' }),
+    monitorId: varchar('monitor_id', { length: 36 })
+      .notNull()
+      .references(() => monitors.id, { onDelete: 'cascade' }),
+    storageKey: varchar('storage_key', { length: 512 }).notNull().unique(),
+    checksum: varchar('checksum', { length: 64 }).notNull(),
+    byteSize: int('byte_size').notNull(),
+    mediaType: varchar('media_type', { length: 128 }).notNull(),
+    confidential: mysqlEnum('confidential', ['yes', 'no']).notNull().default('yes'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+  },
+  (table) => [
+    index('snapshots_expiry_idx').on(table.expiresAt, table.id),
+    index('snapshots_monitor_created_idx').on(table.monitorId, table.createdAt),
+  ],
+);
+
 export const outboxEvents = mysqlTable(
   'outbox_events',
   {
