@@ -140,6 +140,7 @@ describe('public destination policy', () => {
     expect(isPublicIpAddress('10.0.0.1')).toBe(false);
     expect(isPublicIpAddress('203.0.113.1')).toBe(false);
     expect(isPublicIpAddress('224.0.0.1')).toBe(false);
+    expect(isPublicIpAddress('240.0.0.1')).toBe(false);
     expect(isPublicIpAddress('::1')).toBe(false);
     expect(isPublicIpAddress('::ffff:127.0.0.1')).toBe(false);
     expect(isPublicIpAddress('::ffff:7f00:1')).toBe(false);

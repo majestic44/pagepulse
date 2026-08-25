@@ -1,10 +1,33 @@
 import { createHash } from 'node:crypto';
 import { lookup as dnsLookup } from 'node:dns/promises';
-import { request as httpRequest, type IncomingHttpHeaders, type RequestOptions } from 'node:http';
-import { request as httpsRequest } from 'node:https';
-import { isIP, type LookupFunction } from 'node:net';
+import type { IncomingHttpHeaders } from 'node:http';
+import { isIP } from 'node:net';
 
 import { load } from 'cheerio';
+
+import {
+  SafeHttpError,
+  safeHttpFetch,
+  type HostResolver as SafeHostResolver,
+  type SafeHttpTransport,
+} from './safe-http.js';
+
+export {
+  defaultHostResolver,
+  defaultSafeHttpTransport,
+  isPublicIpAddress as isSafeHttpPublicIpAddress,
+  pagePulseUserAgent as safeHttpUserAgent,
+  safeHttpFetch,
+  SafeHttpError,
+  validatePublicHttpDestination,
+} from './safe-http.js';
+export type {
+  HostResolver as SafeHttpHostResolver,
+  ResolvedAddress as SafeHttpResolvedAddress,
+  SafeHttpFetchOptions,
+  SafeHttpResponse,
+  SafeHttpTransport,
+} from './safe-http.js';
 
 const MAXIMUM_SELECTOR_LENGTH = 512;
 const MAXIMUM_REPEATED_LIST_CANDIDATES = 6;
@@ -18,7 +41,6 @@ const DEFAULT_PREVIEW_MAX_BYTES = 512 * 1_024;
 const DEFAULT_PREVIEW_MAX_CHARACTERS = 20_000;
 const DEFAULT_PREVIEW_MAX_REDIRECTS = 3;
 const DEFAULT_PREVIEW_TIMEOUT_MS = 15_000;
-const pagePulseUserAgent = 'PagePulse/1.0 (+https://pagepulse.local)';
 
 export type MonitorTargetType = 'css_selector' | 'whole_page';
 
@@ -334,6 +356,7 @@ const blockedIpv4Ranges: ReadonlyArray<readonly [string, number]> = [
   ['198.51.100.0', 24],
   ['203.0.113.0', 24],
   ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
 ];
 
 function ipv6AsBigInt(address: string) {
@@ -460,95 +483,10 @@ export async function validatePreviewDestination(
   await resolvePublicAddress(url.hostname, resolver);
 }
 
-function createSafeLookup(resolver: HostResolver): LookupFunction {
-  return (hostname, _options, callback) => {
-    void resolvePublicAddress(hostname, resolver).then(
-      ({ address, family }) => callback(null, address, family),
-      () => callback(new Error('Preview destination is not allowed'), ''),
-    );
-  };
-}
-
 function headerValue(headers: IncomingHttpHeaders, name: string) {
   const value = headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
-
-function readResponseBody(response: import('node:http').IncomingMessage, maxBytes: number) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let length = 0;
-    response.on('data', (chunk: Buffer) => {
-      length += chunk.length;
-      if (length > maxBytes) {
-        response.destroy(new MonitorPreviewError('response_too_large'));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    response.once('end', () => resolve(Buffer.concat(chunks)));
-    response.once('error', reject);
-    response.once('aborted', () => reject(new MonitorPreviewError('fetch_failed')));
-  });
-}
-
-const defaultPreviewHttpTransport: PreviewHttpTransport = async (url, options) =>
-  new Promise((resolve, reject) => {
-    const requestOptions: RequestOptions = {
-      agent: false,
-      headers: {
-        Accept: 'text/html,application/xhtml+xml;q=0.9',
-        'Accept-Encoding': 'identity',
-        'User-Agent': pagePulseUserAgent,
-      },
-      lookup: createSafeLookup(options.resolver),
-      method: 'GET',
-      timeout: options.timeoutMs,
-    };
-    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
-      url,
-      requestOptions,
-      (response) => {
-        if (
-          response.statusCode !== undefined &&
-          response.statusCode >= 300 &&
-          response.statusCode < 400
-        ) {
-          response.resume();
-          resolve({
-            body: Buffer.alloc(0),
-            headers: response.headers,
-            statusCode: response.statusCode,
-          });
-          return;
-        }
-        const contentLength = headerValue(response.headers, 'content-length');
-        if (contentLength && Number(contentLength) > options.maxBytes) {
-          response.resume();
-          reject(new MonitorPreviewError('response_too_large'));
-          return;
-        }
-        const contentEncoding = headerValue(response.headers, 'content-encoding');
-        if (contentEncoding && contentEncoding.toLowerCase() !== 'identity') {
-          response.resume();
-          reject(new MonitorPreviewError('unsupported_response'));
-          return;
-        }
-        void readResponseBody(response, options.maxBytes).then(
-          (body) =>
-            resolve({ body, headers: response.headers, statusCode: response.statusCode ?? 0 }),
-          reject,
-        );
-      },
-    );
-    request.once('timeout', () => request.destroy(new MonitorPreviewError('fetch_failed')));
-    request.once('error', (error) => {
-      reject(
-        error instanceof MonitorPreviewError ? error : new MonitorPreviewError('fetch_failed'),
-      );
-    });
-    request.end();
-  });
 
 function isHtmlContentType(contentType: string | undefined) {
   return (
@@ -744,29 +682,15 @@ export async function previewHtmlTarget(
   ) {
     throw new Error('Preview request limits are invalid');
   }
-  let url: URL;
   try {
-    url = new URL(input.url);
-  } catch {
-    throw new MonitorPreviewError('destination_not_allowed');
-  }
-  const resolver = options.resolver ?? defaultResolver;
-  const request = options.request ?? defaultPreviewHttpTransport;
-  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-    await validatePreviewDestination(url, resolver);
-    const response = await request(url, { maxBytes, resolver, timeoutMs });
-    if (response.statusCode >= 300 && response.statusCode < 400) {
-      const location = headerValue(response.headers, 'location');
-      if (!location || redirectCount === maxRedirects) {
-        throw new MonitorPreviewError('fetch_failed');
-      }
-      try {
-        url = new URL(location, url);
-      } catch {
-        throw new MonitorPreviewError('fetch_failed');
-      }
-      continue;
-    }
+    const response = await safeHttpFetch(input.url, {
+      accept: 'text/html,application/xhtml+xml;q=0.9',
+      maxBytes,
+      maxRedirects,
+      request: options.request as SafeHttpTransport | undefined,
+      resolver: options.resolver as SafeHostResolver | undefined,
+      timeoutMs,
+    });
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw new MonitorPreviewError('fetch_failed');
     }
@@ -774,6 +698,21 @@ export async function previewHtmlTarget(
       throw new MonitorPreviewError('unsupported_response');
     }
     return extractHtmlTarget(response.body.toString('utf8'), input.target, maxCharacters);
+  } catch (error) {
+    if (error instanceof MonitorPreviewError) {
+      throw error;
+    }
+    if (error instanceof SafeHttpError) {
+      if (error.code === 'destination_not_allowed') {
+        throw new MonitorPreviewError('destination_not_allowed');
+      }
+      if (error.code === 'response_too_large') {
+        throw new MonitorPreviewError('response_too_large');
+      }
+      if (error.code === 'response_compressed') {
+        throw new MonitorPreviewError('unsupported_response');
+      }
+    }
+    throw new MonitorPreviewError('fetch_failed');
   }
-  throw new MonitorPreviewError('fetch_failed');
 }
