@@ -39,6 +39,8 @@ describe('loadEnvironment', () => {
       AUTH_TOTP_RATE_LIMIT_MAX: 5,
       MONITOR_PREVIEW_RATE_LIMIT_MAX: 10,
       MONITOR_PREVIEW_RATE_LIMIT_WINDOW_MS: 60_000,
+      SNAPSHOT_RETENTION_DAYS: 7,
+      CHECK_HISTORY_RETENTION_DAYS: 30,
     });
   });
 
@@ -86,6 +88,12 @@ describe('loadEnvironment', () => {
     expect(validationError?.issues).toContainEqual(
       expect.objectContaining({ path: ['SESSION_IDLE_TTL_MINUTES'] }),
     );
+  });
+
+  it('keeps snapshot retention within check-history retention', () => {
+    expect(() =>
+      loadEnvironment({ CHECK_HISTORY_RETENTION_DAYS: '7', SNAPSHOT_RETENTION_DAYS: '8' }),
+    ).toThrow(EnvironmentValidationError);
   });
 
   it('rejects an unsafe scheduler reconciliation interval', () => {

@@ -5,8 +5,12 @@ import {
   listActiveMonitorSchedules,
   listPendingOutboxEvents,
   markOutboxEventPublished,
+  listExpiredSnapshots,
+  purgeExpiredChecks,
   purgeExpiredAuditEvents,
   purgeExpiredAccountDeletions as purgeExpiredAccountDeletionRecords,
+  removeExpiredSnapshotRecord,
+  removeSnapshotFile,
   withAccountDeletionTransaction,
 } from '@pagepulse/db';
 import {
@@ -130,11 +134,19 @@ async function startControlWorker() {
   if (role === 'maintenance') {
     const pool = createDatabasePool(environment.DATABASE_URL);
     runAccountDeletionPurge = async () => {
+      const now = new Date();
+      const expiredSnapshots = await listExpiredSnapshots(pool, now);
+      let purgedSnapshots = 0;
+      for (const snapshot of expiredSnapshots) {
+        await removeSnapshotFile(environment.SNAPSHOT_ROOT, snapshot.storageKey);
+        purgedSnapshots += await removeExpiredSnapshotRecord(pool, snapshot.id, now);
+      }
       const result = await withAccountDeletionTransaction(pool, async (connection) => ({
         purgedAccounts: await purgeExpiredAccountDeletionRecords(connection),
         purgedAuditEvents: await purgeExpiredAuditEvents(connection),
+        purgedChecks: await purgeExpiredChecks(connection, now),
       }));
-      logger.info(result, 'Account deletion and audit cleanup completed');
+      logger.info({ ...result, purgedSnapshots }, 'Retention cleanup completed');
     };
     resources.push({
       close: async () => {

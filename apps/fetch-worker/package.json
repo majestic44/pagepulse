@@ -14,6 +14,7 @@
   "dependencies": {
     "@pagepulse/config": "workspace:*",
     "@pagepulse/db": "workspace:*",
+    "@pagepulse/monitor-engine": "workspace:*",
     "@pagepulse/queue": "workspace:*"
   },
   "devDependencies": {

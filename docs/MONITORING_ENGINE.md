@@ -83,3 +83,16 @@ are resolved by the scheduler instead of application-side timestamp arithmetic.
 The scheduler queues only monitor and check IDs. Before a fetch worker uses a per-domain concurrency slot, it re-reads
 the active monitor revision from MariaDB and derives the hostname locally; stale jobs are discarded without a network
 request.
+
+## Snapshot publication and retention
+
+The fetch worker normalizes a successful HTTP response, serializes only its canonical representation, and writes it to
+the private snapshot volume using prepare → file sync → an atomic non-overwriting publish. It then commits the check outcome
+and snapshot metadata together in MariaDB. Queue retries use the stable check ID, so an already-recorded check is never
+overwritten. Snapshot rows contain a storage key, SHA-256 checksum, byte size, media type, confidentiality flag and
+expiry—not fetched content.
+
+The maintenance worker removes expired snapshot files before deleting their metadata in bounded batches. A missing file
+is treated as already removed so cleanup can recover from partial prior attempts; a failed deletion retains the row for
+the next sweep. Snapshots are retained for seven days by default and check metadata for 30 days; configuration rejects a
+snapshot retention period longer than the associated check history.
