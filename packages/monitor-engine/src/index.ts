@@ -35,6 +35,21 @@ export {
   parseRssAtomSource,
   SourceAdapterError,
 } from './source-adapters.js';
+export {
+  canonicalMonitorSourceJson,
+  MonitorNormalizationError,
+  normalizeMonitorSource,
+  normalizeMonitorText,
+  normalizeMonitorUrl,
+} from './normalization.js';
+export type {
+  CanonicalHtmlSource,
+  CanonicalJsonSource,
+  CanonicalMonitorSource,
+  CanonicalRssAtomSource,
+  NormalizeMonitorSourceOptions,
+  NormalizedMonitorContent,
+} from './normalization.js';
 export type {
   FetchMonitorSourceOptions,
   FeedSourceItem,
