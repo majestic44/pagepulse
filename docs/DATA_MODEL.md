@@ -30,7 +30,9 @@
   with optional repeated-list item, identity, and bounded ignore selectors. It is updated atomically with the monitor
   revision. Existing monitors default to whole-page extraction until configured; visual locators remain a later
   addition.
-- `monitor_rules`: rule type and versioned configuration.
+- `monitor_rules`: MariaDB-authoritative one-per-monitor text-change/new-item/keyword configuration, the monitor
+  revision it belongs to, and pending/established baseline state. Updating rules resets the baseline for the new
+  monitor revision; a future evaluator establishes it before producing alerts.
 - `monitor_ignore_rules`: selectors, normalized patterns and built-in noise flags.
 - `auth_flows`: encrypted field mappings/session references and reauthorization state.
 - `checks`: due/start/end, worker/fetch method, result class, HTTP metadata, content hash, timings and correlation ID.

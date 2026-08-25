@@ -420,6 +420,51 @@ export const MonitorTargetResponse = Type.Object({
   target: MonitorTargetSummary,
 });
 
+export const MonitorKeywordTransition = Type.Union([
+  Type.Literal('appears'),
+  Type.Literal('disappears'),
+]);
+
+export const MonitorKeywordRuleConfiguration = Type.Object(
+  {
+    phrases: Type.Array(Type.String({ minLength: 1, maxLength: 160 }), {
+      maxItems: 25,
+      minItems: 1,
+      uniqueItems: true,
+    }),
+    transition: MonitorKeywordTransition,
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorRuleConfiguration = Type.Object(
+  {
+    keyword: Type.Optional(MonitorKeywordRuleConfiguration),
+    newItem: Type.Optional(Type.Boolean()),
+    textChange: Type.Optional(Type.Boolean()),
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorRuleSummary = Type.Object({
+  keyword: Type.Union([MonitorKeywordRuleConfiguration, Type.Null()]),
+  newItem: Type.Boolean(),
+  textChange: Type.Boolean(),
+});
+
+export const MonitorRuleBaseline = Type.Object({
+  revision: Type.Integer({ minimum: 1 }),
+  state: Type.Union([Type.Literal('pending'), Type.Literal('established')]),
+});
+
+export const MonitorRulesResponse = Type.Object({
+  monitor: MonitorSummary,
+  rules: Type.Object({
+    baseline: MonitorRuleBaseline,
+    configuration: MonitorRuleSummary,
+  }),
+});
+
 export const MonitorTargetPreview = Type.Object({
   matchCount: Type.Integer({ minimum: 1 }),
   repeatedList: Type.Union([
@@ -469,6 +514,10 @@ export const InvalidMonitorRequestResponse = Type.Object({
 
 export const InvalidMonitorScheduleRequestResponse = Type.Object({
   error: Type.Literal('Invalid monitor schedule'),
+});
+
+export const InvalidMonitorRuleRequestResponse = Type.Object({
+  error: Type.Literal('Invalid monitor rule'),
 });
 
 export const InvalidMonitorTargetRequestResponse = Type.Object({

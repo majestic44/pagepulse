@@ -12,6 +12,8 @@ const MAXIMUM_REPEATED_LIST_PARENT_ELEMENTS = 128;
 const MAXIMUM_REPEATED_LIST_IGNORE_SELECTORS = 10;
 const MAXIMUM_REPEATED_LIST_PREVIEW_ITEMS = 5;
 const MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS = 1_000;
+const MAXIMUM_KEYWORD_RULE_PHRASES = 25;
+const MAXIMUM_KEYWORD_RULE_PHRASE_LENGTH = 160;
 const DEFAULT_PREVIEW_MAX_BYTES = 512 * 1_024;
 const DEFAULT_PREVIEW_MAX_CHARACTERS = 20_000;
 const DEFAULT_PREVIEW_MAX_REDIRECTS = 3;
@@ -19,6 +21,25 @@ const DEFAULT_PREVIEW_TIMEOUT_MS = 15_000;
 const pagePulseUserAgent = 'PagePulse/1.0 (+https://pagepulse.local)';
 
 export type MonitorTargetType = 'css_selector' | 'whole_page';
+
+export type MonitorKeywordTransition = 'appears' | 'disappears';
+
+export type MonitorKeywordRuleConfiguration = Readonly<{
+  phrases: ReadonlyArray<string>;
+  transition: MonitorKeywordTransition;
+}>;
+
+export type MonitorRuleConfiguration = Readonly<{
+  keyword?: MonitorKeywordRuleConfiguration | undefined;
+  newItem?: boolean | undefined;
+  textChange?: boolean | undefined;
+}>;
+
+export type NormalizedMonitorRuleConfiguration = Readonly<{
+  keyword: MonitorKeywordRuleConfiguration | null;
+  newItem: boolean;
+  textChange: boolean;
+}>;
 
 export type MonitorRepeatedListConfiguration = Readonly<{
   identitySelector: string;
@@ -108,6 +129,13 @@ export class MonitorTargetValidationError extends Error {
   }
 }
 
+export class MonitorRuleValidationError extends Error {
+  constructor(message: string) {
+    super(`Monitor rule is invalid: ${message}`);
+    this.name = 'MonitorRuleValidationError';
+  }
+}
+
 export class MonitorPreviewError extends Error {
   constructor(
     readonly code:
@@ -124,6 +152,63 @@ export class MonitorPreviewError extends Error {
 
 export function normalizeText(value: string): string {
   return value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+}
+
+export function normalizeMonitorRuleConfiguration(
+  configuration: MonitorRuleConfiguration,
+): NormalizedMonitorRuleConfiguration {
+  if (configuration === null || typeof configuration !== 'object' || Array.isArray(configuration)) {
+    throw new MonitorRuleValidationError('configuration is invalid');
+  }
+  const textChange = configuration.textChange === true;
+  const newItem = configuration.newItem === true;
+  if (configuration.textChange !== undefined && typeof configuration.textChange !== 'boolean') {
+    throw new MonitorRuleValidationError('textChange is invalid');
+  }
+  if (configuration.newItem !== undefined && typeof configuration.newItem !== 'boolean') {
+    throw new MonitorRuleValidationError('newItem is invalid');
+  }
+  let keyword: MonitorKeywordRuleConfiguration | null = null;
+  if (configuration.keyword !== undefined) {
+    const candidate = configuration.keyword;
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new MonitorRuleValidationError('keyword is invalid');
+    }
+    if (candidate.transition !== 'appears' && candidate.transition !== 'disappears') {
+      throw new MonitorRuleValidationError('keyword transition is invalid');
+    }
+    if (
+      !Array.isArray(candidate.phrases) ||
+      candidate.phrases.length === 0 ||
+      candidate.phrases.length > MAXIMUM_KEYWORD_RULE_PHRASES
+    ) {
+      throw new MonitorRuleValidationError('keyword phrases are invalid');
+    }
+    const phrases = candidate.phrases.map((phrase) => {
+      if (typeof phrase !== 'string') {
+        throw new MonitorRuleValidationError('keyword phrase is invalid');
+      }
+      const normalized = normalizeText(phrase);
+      if (
+        normalized.length === 0 ||
+        normalized.length > MAXIMUM_KEYWORD_RULE_PHRASE_LENGTH ||
+        containsControlCharacter(normalized)
+      ) {
+        throw new MonitorRuleValidationError('keyword phrase is invalid');
+      }
+      return normalized;
+    });
+    if (
+      new Set(phrases.map((phrase) => phrase.toLocaleLowerCase('en-US'))).size !== phrases.length
+    ) {
+      throw new MonitorRuleValidationError('keyword phrases must be unique');
+    }
+    keyword = { phrases, transition: candidate.transition };
+  }
+  if (!textChange && !newItem && keyword === null) {
+    throw new MonitorRuleValidationError('at least one rule must be enabled');
+  }
+  return { keyword, newItem, textChange };
 }
 
 export function contentHash(value: string): string {

@@ -222,6 +222,16 @@ h3 {
 .extraction-settings h3 {
   margin: 0;
 }
+
+.checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 0.6rem;
+}
+
+.checkbox-label input {
+  inline-size: auto;
+}
 .extraction-preview {
   background: var(--panel);
   border: 1px solid var(--line);

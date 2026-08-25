@@ -28,7 +28,7 @@ const milestones = [
   },
   {
     detail:
-      'Members can create, revise, pause, resume and delete public monitors, choose schedules, and configure whole-page, CSS-selector, or repeated-list extraction.',
+      'Members can create, revise, pause, resume and delete public monitors, choose schedules, configure extraction, and set baseline-aware change rules.',
     label: 'Phase 3',
     status: 'In progress',
     title: 'Monitor configuration',
@@ -152,6 +152,25 @@ type MonitorTargetPreview = Readonly<{
   >;
   text: string;
   truncated: boolean;
+}>;
+
+type MonitorKeywordTransition = 'appears' | 'disappears';
+
+type MonitorRuleSummary = Readonly<{
+  keyword: Readonly<{
+    phrases: ReadonlyArray<string>;
+    transition: MonitorKeywordTransition;
+  }> | null;
+  newItem: boolean;
+  textChange: boolean;
+}>;
+
+type MonitorRulesResponse = Readonly<{
+  monitor: MonitorSummary;
+  rules: Readonly<{
+    baseline: Readonly<{ revision: number; state: 'established' | 'pending' }>;
+    configuration: MonitorRuleSummary;
+  }>;
 }>;
 
 type MonitorManagementState =
@@ -832,6 +851,13 @@ function MonitorManagement() {
   const [repeatedListIdentitySelector, setRepeatedListIdentitySelector] = useState('');
   const [repeatedListIgnoreSelectors, setRepeatedListIgnoreSelectors] = useState('');
   const [targetPreview, setTargetPreview] = useState<MonitorTargetPreview>();
+  const [ruleMonitor, setRuleMonitor] = useState<MonitorSummary>();
+  const [ruleTextChange, setRuleTextChange] = useState(true);
+  const [ruleNewItem, setRuleNewItem] = useState(false);
+  const [ruleKeywords, setRuleKeywords] = useState('');
+  const [ruleKeywordTransition, setRuleKeywordTransition] =
+    useState<MonitorKeywordTransition>('appears');
+  const [ruleBaseline, setRuleBaseline] = useState<MonitorRulesResponse['rules']['baseline']>();
   const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState<string>();
 
@@ -931,6 +957,89 @@ function MonitorManagement() {
     setRepeatedListIdentitySelector('');
     setRepeatedListIgnoreSelectors('');
     setTargetPreview(undefined);
+  }
+
+  function rulePayload() {
+    const phrases = ruleKeywords
+      .split(/\r?\n/u)
+      .map((phrase) => phrase.trim())
+      .filter((phrase) => phrase.length > 0);
+    return {
+      ...(phrases.length > 0 ? { keyword: { phrases, transition: ruleKeywordTransition } } : {}),
+      newItem: ruleNewItem,
+      textChange: ruleTextChange,
+    };
+  }
+
+  function loadRuleForm(rules: MonitorRulesResponse['rules']) {
+    setRuleTextChange(rules.configuration.textChange);
+    setRuleNewItem(rules.configuration.newItem);
+    setRuleKeywords(rules.configuration.keyword?.phrases.join('\n') ?? '');
+    setRuleKeywordTransition(rules.configuration.keyword?.transition ?? 'appears');
+    setRuleBaseline(rules.baseline);
+  }
+
+  async function openRules(monitor: MonitorSummary) {
+    setSubmitting(monitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(monitor.id)}/rules`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error('Unable to load monitor rules');
+      }
+      const payload = (await response.json()) as MonitorRulesResponse;
+      replaceMonitor(payload.monitor);
+      setRuleMonitor(payload.monitor);
+      loadRuleForm(payload.rules);
+    } catch {
+      setMessage('Rule configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function saveRules(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!ruleMonitor) {
+      return;
+    }
+    setSubmitting(ruleMonitor.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/monitors/${encodeURIComponent(ruleMonitor.id)}/rules`, {
+        body: JSON.stringify(rulePayload()),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'If-Match': `"${ruleMonitor.revision}"` },
+        method: 'PUT',
+      });
+      if (response.status === 409) {
+        await loadMonitors();
+        setRuleMonitor(undefined);
+        setRuleBaseline(undefined);
+        setMessage('This monitor changed elsewhere. The latest configuration has been loaded.');
+        return;
+      }
+      if (response.status === 400) {
+        setMessage('Enable at least one rule and use up to 25 unique keyword phrases.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to save monitor rules');
+      }
+      const payload = (await response.json()) as MonitorRulesResponse;
+      replaceMonitor(payload.monitor);
+      setRuleMonitor(payload.monitor);
+      loadRuleForm(payload.rules);
+      setMessage(
+        'Rules saved. The next successful check establishes a new baseline without alerting.',
+      );
+    } catch {
+      setMessage('Rule configuration is temporarily unavailable. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
   }
 
   async function createMonitor(event: FormEvent<HTMLFormElement>) {
@@ -1722,6 +1831,73 @@ function MonitorManagement() {
         </form>
       ) : null}
 
+      {ruleMonitor ? (
+        <form className="sign-in-form totp-panel" onSubmit={(event) => void saveRules(event)}>
+          <h2>Change rules for {ruleMonitor.name}</h2>
+          <p className="account-intro">
+            Rules describe what should count as a change. Saving any configuration resets its
+            baseline; the next successful check captures that baseline and does not alert.
+          </p>
+          <label className="checkbox-label">
+            <input
+              checked={ruleTextChange}
+              onChange={(event) => setRuleTextChange(event.target.checked)}
+              type="checkbox"
+            />
+            Alert when extracted text changes
+          </label>
+          <label className="checkbox-label">
+            <input
+              checked={ruleNewItem}
+              onChange={(event) => setRuleNewItem(event.target.checked)}
+              type="checkbox"
+            />
+            Alert when a repeated-list item is new (requires repeated-list extraction)
+          </label>
+          <label>
+            Keyword phrases (optional, one per line)
+            <textarea
+              maxLength={4_024}
+              onChange={(event) => setRuleKeywords(event.target.value)}
+              placeholder={'Opening soon\nHiring freeze'}
+              value={ruleKeywords}
+            />
+          </label>
+          <label>
+            Keyword transition
+            <select
+              onChange={(event) =>
+                setRuleKeywordTransition(event.target.value as MonitorKeywordTransition)
+              }
+              value={ruleKeywordTransition}
+            >
+              <option value="appears">Appears</option>
+              <option value="disappears">Disappears</option>
+            </select>
+          </label>
+          <p className="account-intro">
+            {ruleBaseline?.state === 'established'
+              ? `Baseline established for revision ${ruleBaseline.revision}.`
+              : `Baseline pending for revision ${ruleBaseline?.revision ?? ruleMonitor.revision}.`}
+          </p>
+          <div className="member-actions">
+            <button disabled={submitting !== undefined} type="submit">
+              Save rules and reset baseline
+            </button>
+            <button
+              disabled={submitting !== undefined}
+              onClick={() => {
+                setRuleMonitor(undefined);
+                setRuleBaseline(undefined);
+              }}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <h2 className="totp-panel">Your monitors</h2>
       {state.monitors.length === 0 ? (
         <p className="account-intro">No monitor configurations yet.</p>
@@ -1744,6 +1920,13 @@ function MonitorManagement() {
                   type="button"
                 >
                   Extraction
+                </button>
+                <button
+                  disabled={submitting !== undefined}
+                  onClick={() => void openRules(monitor)}
+                  type="button"
+                >
+                  Change rules
                 </button>
                 <button
                   disabled={submitting !== undefined}
@@ -2435,8 +2618,8 @@ function App() {
           Local owner onboarding now sends one-time verification links to development-only Mailpit.
           Production verification and password-reset provider delivery remain deferred.
           Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
-          available. Monitor configuration, scheduling, safe extraction previews, and repeated-list
-          selection are ready; rule configuration follows next.
+          available. Monitor configuration, scheduling, safe extraction previews, repeated-list
+          selection, and baseline-aware change rules are ready.
         </p>
       </section>
 
@@ -2461,11 +2644,11 @@ function App() {
 
       <section className="next" aria-labelledby="next-title">
         <p className="eyebrow">UP NEXT</p>
-        <h2 id="next-title">Monitor scheduling is ready.</h2>
+        <h2 id="next-title">Monitor configuration is nearly complete.</h2>
         <p>
           Public monitor CRUD, revisions, pause/resume controls, member limits and timezone-aware
-          schedules are ready. Target extraction and change rules follow before page-change
-          detection begins.
+          schedules, extraction targeting, and baseline-aware change rules are ready. Next comes the
+          HTTP monitoring engine and deterministic change detection.
         </p>
       </section>
     </main>

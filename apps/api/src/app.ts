@@ -24,6 +24,7 @@ import {
   MonitorLimitError,
   MonitorNotFoundError,
   MonitorRevisionConflictError,
+  MonitorRuleValidationError,
   MonitorScheduleNotFoundError,
   MonitorScheduleValidationError,
   MonitorStateError,
@@ -33,6 +34,7 @@ import {
   type Monitor,
   type MonitorSchedule,
   type MonitorTarget,
+  type MonitorRules,
 } from '@pagepulse/db';
 import {
   AccountDeletionConflictResponse,
@@ -50,6 +52,7 @@ import {
   HealthResponse,
   InvalidMonitorRequestResponse,
   InvalidMonitorScheduleRequestResponse,
+  InvalidMonitorRuleRequestResponse,
   InvalidMonitorTargetRequestResponse,
   InvalidAuthenticationRequestResponse,
   InvalidAccountDeletionConfirmationResponse,
@@ -64,6 +67,8 @@ import {
   MonitorRevisionConflictResponse,
   MonitorScheduleConfiguration,
   MonitorScheduleResponse,
+  MonitorRuleConfiguration,
+  MonitorRulesResponse,
   MonitorSummary,
   MonitorTargetConfiguration,
   MonitorTargetPreviewResponse,
@@ -369,6 +374,10 @@ export async function buildApp(options: BuildAppOptions = {}) {
     selector: target.selector,
     targetType: target.targetType,
   });
+  const serializeMonitorRules = (rules: MonitorRules) => ({
+    baseline: rules.baseline,
+    configuration: rules.configuration,
+  });
   const auditContext = (request: FastifyRequest) => ({
     requesterIpHash: hashAuditRequesterIp(request.ip),
     requestId: request.id,
@@ -414,6 +423,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const invalidMonitorResponse = { error: 'Invalid monitor request' } as const;
   const invalidMonitorScheduleResponse = { error: 'Invalid monitor schedule' } as const;
   const invalidMonitorTargetResponse = { error: 'Invalid monitor target' } as const;
+  const invalidMonitorRuleResponse = { error: 'Invalid monitor rule' } as const;
   const monitorLimitResponse = { error: 'Monitor limit reached' } as const;
   const monitorPreviewTargetNotAllowedResponse = {
     error: 'Preview target is not allowed',
@@ -453,6 +463,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
     }
     if (error instanceof MonitorTargetValidationError) {
       return reply.code(400).send(invalidMonitorTargetResponse);
+    }
+    if (error instanceof MonitorRuleValidationError) {
+      return reply.code(400).send(invalidMonitorRuleResponse);
     }
     if (error instanceof MonitorLimitError) {
       return reply.code(409).send(monitorLimitResponse);
@@ -1396,6 +1409,83 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return reply.header('ETag', `"${result.monitor.revision}"`).send({
           monitor: serializeMonitor(result.monitor),
           target: serializeMonitorTarget(result.target),
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/rules',
+    {
+      schema: {
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorRulesResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const result = await current.authentication.monitors.getRules(
+          current.session.userId,
+          request.params.monitorId,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          rules: serializeMonitorRules(result.rules),
+        });
+      } catch (error) {
+        return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.put<{ Body: Static<typeof MonitorRuleConfiguration>; Params: { monitorId: string } }>(
+    '/api/v1/monitors/:monitorId/rules',
+    {
+      schema: {
+        body: MonitorRuleConfiguration,
+        params: MonitorIdParameters,
+        response: {
+          200: MonitorRulesResponse,
+          400: InvalidMonitorRuleRequestResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      const expectedRevision = monitorRevision(request.headers['if-match']);
+      if (!expectedRevision) {
+        return reply.code(400).send(invalidMonitorRuleResponse);
+      }
+      try {
+        const result = await current.authentication.monitors.updateRules(
+          current.session.userId,
+          request.params.monitorId,
+          expectedRevision,
+          request.body,
+        );
+        return reply.header('ETag', `"${result.monitor.revision}"`).send({
+          monitor: serializeMonitor(result.monitor),
+          rules: serializeMonitorRules(result.rules),
         });
       } catch (error) {
         return sendMonitorError(reply, error);
