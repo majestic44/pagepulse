@@ -15,6 +15,7 @@ import {
   type QueueName,
   type QueuePayloadByName,
 } from '@pagepulse/contracts';
+import { createHash, randomUUID } from 'node:crypto';
 
 export { QueueNames, type QueueName, type QueuePayloadByName } from '@pagepulse/contracts';
 
@@ -158,6 +159,9 @@ export const MINIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES =
   MINIMUM_MONITOR_SCHEDULE_INTERVAL_MS / 60_000;
 export const MAXIMUM_MONITOR_SCHEDULE_INTERVAL_MINUTES = Math.floor(2_147_483_647 / 60_000);
 const monitorSchedulerIdPrefix = 'monitor-';
+export const SCHEDULE_DISPATCH_JITTER_MAXIMUM_MS = 60_000;
+export const SCHEDULE_DISPATCH_ATTEMPTS = 5;
+export const SCHEDULE_DISPATCH_BACKOFF_DELAY_MS = 1_000;
 
 export type MonitorScheduleDefinition = Readonly<{
   correlationId: string;
@@ -184,6 +188,94 @@ export class MonitorScheduleValidationError extends Error {
 
 export function monitorJobSchedulerId({ monitorId, monitorRevision }: MonitorScheduleDefinition) {
   return `${monitorSchedulerIdPrefix}${Buffer.from(monitorId).toString('base64url')}-r${monitorRevision}`;
+}
+
+export function deterministicJitterMilliseconds(
+  seed: string,
+  maximumMilliseconds = SCHEDULE_DISPATCH_JITTER_MAXIMUM_MS,
+) {
+  if (!Number.isSafeInteger(maximumMilliseconds) || maximumMilliseconds < 0) {
+    throw new MonitorScheduleValidationError('jitter maximum must be a non-negative integer');
+  }
+  const digest = createHash('sha256').update(seed).digest();
+  return digest.readUInt32BE(0) % (maximumMilliseconds + 1);
+}
+
+export function scheduledPageFetchJobId(
+  scheduleJobId: string,
+  monitorId: string,
+  monitorRevision: number,
+) {
+  return `scheduled-${createHash('sha256')
+    .update(`${scheduleJobId}:${monitorId}:${monitorRevision}`)
+    .digest('hex')}`;
+}
+
+export async function dispatchScheduledPageFetch(
+  queue: QueueForName<typeof QueueNames.pageFetch>,
+  schedule: QueuePayloadByName[typeof QueueNames.monitorSchedule],
+  scheduleJobId: string,
+) {
+  const payload = {
+    checkId: randomUUID(),
+    correlationId: schedule.correlationId,
+    monitorId: schedule.monitorId,
+    monitorRevision: schedule.monitorRevision,
+    version: 1,
+  } as const;
+  return enqueueJob(QueueNames.pageFetch, queue, payload, {
+    attempts: SCHEDULE_DISPATCH_ATTEMPTS,
+    backoff: { delay: SCHEDULE_DISPATCH_BACKOFF_DELAY_MS, type: 'exponential' },
+    delay: deterministicJitterMilliseconds(
+      `${scheduleJobId}:${schedule.monitorId}:${schedule.monitorRevision}`,
+    ),
+    jobId: scheduledPageFetchJobId(scheduleJobId, schedule.monitorId, schedule.monitorRevision),
+    removeOnComplete: 1_000,
+    removeOnFail: 1_000,
+  });
+}
+
+export type DomainConcurrencyGate = Readonly<{
+  run: <Result>(domain: string, operation: () => Promise<Result>) => Promise<Result>;
+}>;
+
+export function createDomainConcurrencyGate(limit: number): DomainConcurrencyGate {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error('Domain concurrency limit must be a positive integer');
+  }
+  const pending = new Map<string, Array<() => void>>();
+  const active = new Map<string, number>();
+  const release = (domain: string) => {
+    const next = pending.get(domain)?.shift();
+    if (next) {
+      next();
+      return;
+    }
+    active.delete(domain);
+    pending.delete(domain);
+  };
+  return {
+    async run<Result>(domain: string, operation: () => Promise<Result>) {
+      const normalizedDomain = domain.toLowerCase();
+      if (normalizedDomain.length === 0) {
+        throw new Error('Domain is required');
+      }
+      if ((active.get(normalizedDomain) ?? 0) >= limit) {
+        await new Promise<void>((resolve) => {
+          const queue = pending.get(normalizedDomain) ?? [];
+          queue.push(resolve);
+          pending.set(normalizedDomain, queue);
+        });
+      } else {
+        active.set(normalizedDomain, (active.get(normalizedDomain) ?? 0) + 1);
+      }
+      try {
+        return await operation();
+      } finally {
+        release(normalizedDomain);
+      }
+    },
+  };
 }
 
 function validateMonitorSchedule(schedule: MonitorScheduleDefinition) {
@@ -284,7 +376,12 @@ export async function reconcileMonitorSchedules(
         version: 1,
       },
       name: QueueNames.monitorSchedule,
-      opts: { removeOnComplete: 1_000, removeOnFail: 1_000 },
+      opts: {
+        attempts: SCHEDULE_DISPATCH_ATTEMPTS,
+        backoff: { delay: SCHEDULE_DISPATCH_BACKOFF_DELAY_MS, type: 'exponential' },
+        removeOnComplete: 1_000,
+        removeOnFail: 1_000,
+      },
     });
     upserted += 1;
   }

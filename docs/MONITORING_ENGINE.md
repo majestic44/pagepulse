@@ -71,7 +71,7 @@ explicitly requests a test.
 - BullMQ v6 Job Schedulers; do not use legacy repeatable-job APIs.
 - One-hour minimum; schedules stored with member IANA timezone and resolved safely across DST.
 - Deterministic scheduler key contains monitor ID and schedule revision.
-- Jobs include jitter to avoid synchronized checks.
+- Jobs receive up to one minute of deterministic jitter before dispatch to avoid synchronized checks. The scheduler queue retries dispatch with bounded exponential backoff; the fetch queue uses the same retry policy for temporary failures.
 - Missed runs collapse into one catch-up check rather than a burst.
 
 MariaDB stores the member-selected schedule definition and the monitor revision; Redis is rebuilt from that committed
@@ -79,3 +79,7 @@ state during reconciliation. Hourly schedules compile to a timezone-aware cron p
 daily schedules compile to the selected local `HH:MM`, and custom schedules use a fixed whole-minute interval of at
 least one hour. BullMQ/cron-parser receives the IANA time zone for calendar schedules, so daylight-saving transitions
 are resolved by the scheduler instead of application-side timestamp arithmetic.
+
+The scheduler queues only monitor and check IDs. Before a fetch worker uses a per-domain concurrency slot, it re-reads
+the active monitor revision from MariaDB and derives the hostname locally; stale jobs are discarded without a network
+request.

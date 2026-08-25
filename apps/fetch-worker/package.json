@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@pagepulse/config": "workspace:*",
+    "@pagepulse/db": "workspace:*",
     "@pagepulse/queue": "workspace:*"
   },
   "devDependencies": {
