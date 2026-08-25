@@ -3,6 +3,7 @@ export * from './account-deletion.js';
 export * from './audit.js';
 export * from './client.js';
 export * from './check-outcomes.js';
+export * from './changes.js';
 export * from './health.js';
 export * from './migrate.js';
 export * from './members.js';

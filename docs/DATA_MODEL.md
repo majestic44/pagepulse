@@ -41,7 +41,9 @@
 - `snapshots`: one private canonical-content artifact per successful check, with storage key, checksum, byte size, media
   type, expiry and confidentiality flag. Fetched content is never stored in MariaDB or Redis.
 - `detected_items`: monitor, stable identity, first/last seen and current content hash.
-- `changes`: previous/current snapshot references, rule match, summary and lifecycle state.
+- `changes`: previous/current snapshot references, a bounded summary and lifecycle state. A successful
+  check establishes the revision baseline; later normalized-content differences create a pending
+  review record. Members can resolve a record as expected or ignored while both snapshots remain.
 
 ## Delivery and administration
 

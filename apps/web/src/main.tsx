@@ -244,6 +244,22 @@ type MonitorSummary = Readonly<{
   url: string;
 }>;
 
+type ChangeReview = Readonly<{
+  createdAt: string;
+  current: Readonly<{ content: string; id: string; truncated: boolean }>;
+  id: string;
+  monitor: Readonly<{ id: string; name: string }>;
+  previous: Readonly<{ content: string; id: string; truncated: boolean }>;
+  reviewedAt: string | null;
+  state: 'expected' | 'ignored' | 'pending';
+  summary: string;
+}>;
+
+type ChangeReviewState =
+  | Readonly<{ kind: 'loading' }>
+  | Readonly<{ kind: 'signed-out' }>
+  | Readonly<{ changes: ReadonlyArray<ChangeReview>; kind: 'ready' }>;
+
 type MonitorScheduleType = 'custom' | 'daily' | 'hourly';
 
 type MonitorScheduleSummary = Readonly<{
@@ -2127,6 +2143,167 @@ function MonitorManagement() {
   );
 }
 
+function ChangeReviews() {
+  const [state, setState] = useState<ChangeReviewState>({ kind: 'loading' });
+  const [message, setMessage] = useState<string>();
+  const [submitting, setSubmitting] = useState<string>();
+
+  const loadChanges = useCallback(async () => {
+    setMessage(undefined);
+    try {
+      const response = await fetch('/api/v1/changes', { credentials: 'same-origin' });
+      if (response.status === 401) {
+        setState({ kind: 'signed-out' });
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to load change reviews');
+      }
+      const payload = (await response.json()) as { changes: ReadonlyArray<ChangeReview> };
+      setState({ changes: payload.changes, kind: 'ready' });
+    } catch {
+      setMessage('Change reviews are temporarily unavailable. Please try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadChanges();
+  }, [loadChanges]);
+
+  async function resolveChange(change: ChangeReview, nextState: 'expected' | 'ignored') {
+    setSubmitting(change.id);
+    setMessage(undefined);
+    try {
+      const response = await fetch(`/api/v1/changes/${encodeURIComponent(change.id)}/review`, {
+        body: JSON.stringify({ state: nextState }),
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+      if (response.status === 409) {
+        await loadChanges();
+        setMessage('This change was reviewed in another session. The list has been refreshed.');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Unable to resolve change');
+      }
+      const resolved = (await response.json()) as ChangeReview;
+      setState((current) =>
+        current.kind === 'ready'
+          ? {
+              changes: current.changes.map((value) =>
+                value.id === resolved.id ? resolved : value,
+              ),
+              kind: 'ready',
+            }
+          : current,
+      );
+      setMessage(nextState === 'expected' ? 'Marked as expected.' : 'Ignored for this review.');
+    } catch {
+      setMessage('Unable to save this review. Please try again.');
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  if (state.kind === 'loading') {
+    return (
+      <main className="shell account-shell">
+        <h1>Loading change reviews…</h1>
+      </main>
+    );
+  }
+
+  if (state.kind === 'signed-out') {
+    return (
+      <main className="shell account-shell">
+        <a className="back-link" href="/">
+          ← Project status
+        </a>
+        <p className="eyebrow">CHANGE REVIEWS</p>
+        <h1>Sign in to review changes.</h1>
+        <a className="account-link inline-link" href="/account/sessions">
+          Go to Account security
+        </a>
+      </main>
+    );
+  }
+
+  return (
+    <main className="shell account-shell">
+      <a className="back-link" href="/monitors">
+        ← Monitors
+      </a>
+      <p className="eyebrow">CHANGE REVIEWS</p>
+      <h1>Review detected changes</h1>
+      <p className="account-intro">
+        PagePulse compares normalized, extracted content. Mark an intentional update as expected or
+        ignore a change that does not need follow-up. Snapshot content is available for seven days.
+      </p>
+      {state.changes.length === 0 ? (
+        <p className="account-intro">No changes are ready for review.</p>
+      ) : (
+        <ol className="change-review-list" aria-live="polite">
+          {state.changes.map((change) => (
+            <li key={change.id}>
+              <div className="change-review-heading">
+                <div>
+                  <h2>{change.monitor.name}</h2>
+                  <p>
+                    {change.summary} · detected {formatDate(change.createdAt)}
+                  </p>
+                </div>
+                <strong className={`change-state change-state-${change.state}`}>
+                  {change.state}
+                </strong>
+              </div>
+              <div className="change-content-grid">
+                <section aria-label="Previous content">
+                  <h3>Previous</h3>
+                  <pre>{change.previous.content}</pre>
+                  {change.previous.truncated ? <p>Preview truncated.</p> : null}
+                </section>
+                <section aria-label="Current content">
+                  <h3>Current</h3>
+                  <pre>{change.current.content}</pre>
+                  {change.current.truncated ? <p>Preview truncated.</p> : null}
+                </section>
+              </div>
+              {change.state === 'pending' ? (
+                <div className="member-actions">
+                  <button
+                    disabled={submitting !== undefined}
+                    onClick={() => void resolveChange(change, 'expected')}
+                    type="button"
+                  >
+                    Mark expected
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={submitting !== undefined}
+                    onClick={() => void resolveChange(change, 'ignored')}
+                    type="button"
+                  >
+                    Ignore change
+                  </button>
+                </div>
+              ) : (
+                <p className="account-intro">
+                  Reviewed {formatDate(change.reviewedAt ?? change.createdAt)}.
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      <p aria-live="polite" className="form-message" role="status">
+        {message}
+      </p>
+    </main>
+  );
+}
+
 function OwnerMembers() {
   const [state, setState] = useState<OwnerMembersState>({ kind: 'loading' });
   const [message, setMessage] = useState<string>();
@@ -2729,6 +2906,9 @@ function App() {
         <a className="account-link" href="/monitors">
           Monitors
         </a>
+        <a className="account-link" href="/changes">
+          Change reviews
+        </a>
         <a className="account-link" href="/owner/members">
           Member administration
         </a>
@@ -2798,13 +2978,15 @@ const Page =
         ? AccountSessions
         : pagePath === '/monitors'
           ? MonitorManagement
-          : pagePath === '/account/deletion/recover'
-            ? AccountDeletionRecovery
-            : pagePath === '/owner/members'
-              ? OwnerMembers
-              : pagePath === '/owner/audit-events'
-                ? OwnerAuditEvents
-                : App;
+          : pagePath === '/changes'
+            ? ChangeReviews
+            : pagePath === '/account/deletion/recover'
+              ? AccountDeletionRecovery
+              : pagePath === '/owner/members'
+                ? OwnerMembers
+                : pagePath === '/owner/audit-events'
+                  ? OwnerAuditEvents
+                  : App;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

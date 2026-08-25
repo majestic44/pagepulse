@@ -465,6 +465,45 @@ export const MonitorRulesResponse = Type.Object({
   }),
 });
 
+export const ChangeReviewState = Type.Union([
+  Type.Literal('pending'),
+  Type.Literal('expected'),
+  Type.Literal('ignored'),
+]);
+
+export const ChangeReviewAction = Type.Object(
+  { state: Type.Union([Type.Literal('expected'), Type.Literal('ignored')]) },
+  queuePayloadOptions,
+);
+
+export const ChangeReviewSnapshot = Type.Object({
+  content: Type.String({ maxLength: 200_000 }),
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  truncated: Type.Boolean(),
+});
+
+export const ChangeReview = Type.Object({
+  createdAt: Type.String({ format: 'date-time' }),
+  current: ChangeReviewSnapshot,
+  id: Type.String({ minLength: 1, maxLength: 36 }),
+  monitor: Type.Object({
+    id: Type.String({ minLength: 1, maxLength: 36 }),
+    name: Type.String({ minLength: 1, maxLength: 160 }),
+  }),
+  previous: ChangeReviewSnapshot,
+  reviewedAt: Type.Union([Type.String({ format: 'date-time' }), Type.Null()]),
+  state: ChangeReviewState,
+  summary: Type.String({ minLength: 1, maxLength: 160 }),
+});
+
+export const ChangeReviewsResponse = Type.Object({
+  changes: Type.Array(ChangeReview, { maxItems: 100 }),
+});
+
+export const ChangeIdParameters = Type.Object({
+  changeId: Type.String({ minLength: 1, maxLength: 36 }),
+});
+
 export const MonitorTargetPreview = Type.Object({
   matchCount: Type.Integer({ minimum: 1 }),
   repeatedList: Type.Union([

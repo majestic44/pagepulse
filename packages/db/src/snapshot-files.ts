@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { link, mkdir, open, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
 
 export class SnapshotFileError extends Error {
@@ -76,5 +76,14 @@ export async function removeSnapshotFile(root: string, storageKey: string) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw new SnapshotFileError('remove failed', error);
     }
+  }
+}
+
+export async function readSnapshotFile(root: string, storageKey: string) {
+  const filePath = resolveSnapshotPath(root, storageKey);
+  try {
+    return await readFile(filePath);
+  } catch (error) {
+    throw new SnapshotFileError('read failed', error);
   }
 }

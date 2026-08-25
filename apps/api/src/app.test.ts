@@ -4,6 +4,7 @@ import { loadEnvironment } from '@pagepulse/config';
 import { MonitorPreviewError, MonitorTargetValidationError } from '@pagepulse/monitor-engine';
 import {
   AccountDeletionTokenError,
+  ChangeReviewConflictError,
   MemberLifecycleStateError,
   MonitorRevisionConflictError,
   type ActiveSession,
@@ -76,8 +77,10 @@ function createAuthenticationDependencies(
         },
       }),
       list: vi.fn().mockResolvedValue([monitor]),
+      listChangeReviews: vi.fn().mockResolvedValue([]),
       pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
       resume: vi.fn().mockResolvedValue(monitor),
+      resolveChangeReview: vi.fn(),
       update: vi.fn().mockResolvedValue({ ...monitor, name: 'Updated monitor', revision: 2 }),
       updateSchedule: vi.fn().mockResolvedValue({
         monitor: { ...monitor, revision: 2 },
@@ -1290,6 +1293,39 @@ describe('authentication contract', () => {
       'monitor-id',
       1,
       configuration,
+    );
+  });
+
+  it('requires a session and preserves review conflicts for change actions', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(memberSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        resolveChangeReview: vi.fn().mockRejectedValue(new ChangeReviewConflictError()),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const unauthorized = await testApp.inject({ method: 'GET', url: '/api/v1/changes' });
+    const conflict = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/changes/change-id/review',
+      headers: { cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+      payload: { state: 'expected' },
+    });
+
+    expect(unauthorized.statusCode).toBe(401);
+    expect(conflict.statusCode).toBe(409);
+    expect(authentication.monitors.resolveChangeReview).toHaveBeenCalledWith(
+      memberSession.userId,
+      'change-id',
+      'expected',
     );
   });
 

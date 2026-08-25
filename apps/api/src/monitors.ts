@@ -1,5 +1,7 @@
 import {
   createMonitor,
+  listOwnedChangeReviews,
+  resolveOwnedChangeReview,
   deleteOwnedMonitorSchedule,
   deleteMonitor,
   getMonitorSchedule,
@@ -43,8 +45,16 @@ export type MonitorService = Readonly<{
     monitorId: string,
   ) => Promise<Awaited<ReturnType<typeof getMonitorRules>>>;
   list: (userId: string) => Promise<ReadonlyArray<Monitor>>;
+  listChangeReviews: (
+    userId: string,
+  ) => Promise<Awaited<ReturnType<typeof listOwnedChangeReviews>>>;
   pause: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
   resume: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
+  resolveChangeReview: (
+    userId: string,
+    changeId: string,
+    state: 'expected' | 'ignored',
+  ) => Promise<Awaited<ReturnType<typeof resolveOwnedChangeReview>>>;
   update: (
     userId: string,
     monitorId: string,
@@ -105,6 +115,8 @@ export function createMonitorService({
       withMonitorTransaction(pool, (connection) => getMonitorRules(connection, userId, monitorId)),
     list: (userId) =>
       withMonitorTransaction(pool, (connection) => listMonitors(connection, userId)),
+    listChangeReviews: (userId) =>
+      withMonitorTransaction(pool, (connection) => listOwnedChangeReviews(connection, userId)),
     pause: (userId, monitorId, expectedRevision) =>
       withMonitorTransaction(pool, (connection) =>
         pauseMonitor(connection, userId, monitorId, expectedRevision),
@@ -112,6 +124,10 @@ export function createMonitorService({
     resume: (userId, monitorId, expectedRevision) =>
       withMonitorTransaction(pool, (connection) =>
         resumeMonitor(connection, userId, monitorId, expectedRevision),
+      ),
+    resolveChangeReview: (userId, changeId, state) =>
+      withMonitorTransaction(pool, (connection) =>
+        resolveOwnedChangeReview(connection, userId, changeId, state),
       ),
     update: (userId, monitorId, expectedRevision, configuration) =>
       withMonitorTransaction(pool, (connection) =>

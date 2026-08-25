@@ -13,6 +13,7 @@ import { createLogger, loadEnvironment, type Environment } from '@pagepulse/conf
 import {
   AccountDeletionStateError,
   AccountDeletionTokenError,
+  ChangeReviewConflictError,
   AuthenticationStateError,
   AuthenticationTokenError,
   createDatabasePool,
@@ -30,6 +31,7 @@ import {
   MonitorStateError,
   MonitorTargetValidationError,
   probeDatabase,
+  readSnapshotFile,
   type ActiveSession,
   type Monitor,
   type MonitorSchedule,
@@ -38,6 +40,10 @@ import {
 } from '@pagepulse/db';
 import {
   AccountDeletionConflictResponse,
+  ChangeIdParameters,
+  ChangeReview,
+  ChangeReviewAction,
+  ChangeReviewsResponse,
   AccountDeletionRecoveryRequest,
   AccountDeletionScheduledResponse,
   AccountDeletionRequest,
@@ -377,6 +383,29 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const serializeMonitorRules = (rules: MonitorRules) => ({
     baseline: rules.baseline,
     configuration: rules.configuration,
+  });
+  const snapshotReviewContent = async (snapshot: Readonly<{ id: string; storageKey: string }>) => {
+    const content = (await readSnapshotFile(env.SNAPSHOT_ROOT, snapshot.storageKey)).toString(
+      'utf8',
+    );
+    const maximumLength = 200_000;
+    return {
+      content: content.slice(0, maximumLength),
+      id: snapshot.id,
+      truncated: content.length > maximumLength,
+    };
+  };
+  const serializeChangeReview = async (
+    change: Awaited<ReturnType<AuthenticationDependencies['monitors']['resolveChangeReview']>>,
+  ) => ({
+    createdAt: change.createdAt.toISOString(),
+    current: await snapshotReviewContent(change.current),
+    id: change.id,
+    monitor: change.monitor,
+    previous: await snapshotReviewContent(change.previous),
+    reviewedAt: change.reviewedAt?.toISOString() ?? null,
+    state: change.state,
+    summary: change.summary,
   });
   const auditContext = (request: FastifyRequest) => ({
     requesterIpHash: hashAuditRequesterIp(request.ip),
@@ -1180,6 +1209,77 @@ export async function buildApp(options: BuildAppOptions = {}) {
         return { monitors: monitors.map(serializeMonitor) };
       } catch (error) {
         return sendMonitorError(reply, error);
+      }
+    },
+  );
+
+  app.get(
+    '/api/v1/changes',
+    {
+      schema: {
+        response: {
+          200: ChangeReviewsResponse,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const changes = await current.authentication.monitors.listChangeReviews(
+          current.session.userId,
+        );
+        return { changes: await Promise.all(changes.map(serializeChangeReview)) };
+      } catch {
+        return reply.code(503).send(monitorUnavailableResponse);
+      }
+    },
+  );
+
+  app.post<{
+    Body: Static<typeof ChangeReviewAction>;
+    Params: { changeId: string };
+  }>(
+    '/api/v1/changes/:changeId/review',
+    {
+      schema: {
+        body: ChangeReviewAction,
+        params: ChangeIdParameters,
+        response: {
+          200: ChangeReview,
+          401: UnauthorizedResponse,
+          403: ForbiddenResponse,
+          404: NotFoundResponse,
+          409: MonitorRevisionConflictResponse,
+          503: MonitorUnavailableResponse,
+        },
+      },
+    },
+    async (request, reply) => {
+      const current = await getCurrentSession(request, reply);
+      if (!current) {
+        return reply;
+      }
+      try {
+        const change = await current.authentication.monitors.resolveChangeReview(
+          current.session.userId,
+          request.params.changeId,
+          request.body.state,
+        );
+        return serializeChangeReview(change);
+      } catch (error) {
+        if (error instanceof MonitorNotFoundError) {
+          return reply.code(404).send({ error: 'Not found' });
+        }
+        if (error instanceof ChangeReviewConflictError) {
+          return reply.code(409).send({ error: 'Monitor has changed' });
+        }
+        return reply.code(503).send(monitorUnavailableResponse);
       }
     },
   );
