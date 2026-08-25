@@ -4,18 +4,22 @@ import {
   deleteMonitor,
   getMonitorSchedule,
   getMonitorTarget,
+  getMonitorRules,
   getMonitor,
   listMonitors,
   pauseMonitor,
   resumeMonitor,
   upsertOwnedMonitorSchedule,
   upsertOwnedMonitorTarget,
+  upsertOwnedMonitorRules,
   updateMonitor,
   type Monitor,
   type MonitorConfiguration,
   type MonitorPool,
   type MonitorScheduleConfiguration,
   type MonitorScheduleWithMonitor,
+  type MonitorRuleConfiguration,
+  type MonitorRulesWithMonitor,
   type MonitorTargetConfiguration,
   type MonitorTargetWithMonitor,
   withMonitorTransaction,
@@ -34,6 +38,10 @@ export type MonitorService = Readonly<{
     userId: string,
     monitorId: string,
   ) => Promise<Awaited<ReturnType<typeof getMonitorTarget>>>;
+  getRules: (
+    userId: string,
+    monitorId: string,
+  ) => Promise<Awaited<ReturnType<typeof getMonitorRules>>>;
   list: (userId: string) => Promise<ReadonlyArray<Monitor>>;
   pause: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
   resume: (userId: string, monitorId: string, expectedRevision: number) => Promise<Monitor>;
@@ -55,6 +63,12 @@ export type MonitorService = Readonly<{
     expectedRevision: number,
     configuration: MonitorTargetConfiguration,
   ) => Promise<MonitorTargetWithMonitor>;
+  updateRules: (
+    userId: string,
+    monitorId: string,
+    expectedRevision: number,
+    configuration: MonitorRuleConfiguration,
+  ) => Promise<MonitorRulesWithMonitor>;
 }>;
 
 export type MonitorServiceOptions = Readonly<{
@@ -87,6 +101,8 @@ export function createMonitorService({
       ),
     getTarget: (userId, monitorId) =>
       withMonitorTransaction(pool, (connection) => getMonitorTarget(connection, userId, monitorId)),
+    getRules: (userId, monitorId) =>
+      withMonitorTransaction(pool, (connection) => getMonitorRules(connection, userId, monitorId)),
     list: (userId) =>
       withMonitorTransaction(pool, (connection) => listMonitors(connection, userId)),
     pause: (userId, monitorId, expectedRevision) =>
@@ -108,6 +124,10 @@ export function createMonitorService({
     updateTarget: (userId, monitorId, expectedRevision, configuration) =>
       withMonitorTransaction(pool, (connection) =>
         upsertOwnedMonitorTarget(connection, userId, monitorId, expectedRevision, configuration),
+      ),
+    updateRules: (userId, monitorId, expectedRevision, configuration) =>
+      withMonitorTransaction(pool, (connection) =>
+        upsertOwnedMonitorRules(connection, userId, monitorId, expectedRevision, configuration),
       ),
   };
 }

@@ -156,6 +156,12 @@ to that session's user ID. A caller cannot read or mutate another account's moni
   optional repeated-list configuration is supplied, it also returns at most five bounded item samples after applying
   the member ignore selectors. It never persists the preview request, accepts no alternate URL or credentials, is
   rate-limited per requester, and returns only generic errors for rejected destinations or failed/unsupported pages.
+- `GET /api/v1/monitors/{monitorId}/rules` returns the owned monitor, its rule configuration, and baseline state.
+  Existing monitors default to text-change detection with a pending baseline until a member saves a rule configuration.
+- `PUT /api/v1/monitors/{monitorId}/rules` requires `If-Match` and accepts text-change/new-item toggles plus an
+  optional list of up to 25 unique keyword phrases with an `appears` or `disappears` transition. At least one rule
+  must be enabled. Saving atomically increments the monitor revision, synchronizes any schedule revision, and resets
+  the rule baseline to pending; the first successful check for that revision establishes the baseline without alerting.
 
 Names are trimmed and bounded, and URLs must be absolute HTTP(S) values without embedded credentials or fragments.
 Monitor CRUD and schedule routes store configuration only. The extraction-preview route is the narrowly scoped

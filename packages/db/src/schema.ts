@@ -239,6 +239,19 @@ export const monitorTargets = mysqlTable('monitor_targets', {
   updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
 });
 
+export const monitorRules = mysqlTable('monitor_rules', {
+  monitorId: varchar('monitor_id', { length: 36 })
+    .primaryKey()
+    .references(() => monitors.id, { onDelete: 'cascade' }),
+  monitorRevision: int('monitor_revision').notNull(),
+  configuration: json('configuration').notNull(),
+  baselineState: mysqlEnum('baseline_state', ['pending', 'established'])
+    .notNull()
+    .default('pending'),
+  baselineRevision: int('baseline_revision').notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+});
+
 export const outboxEvents = mysqlTable(
   'outbox_events',
   {

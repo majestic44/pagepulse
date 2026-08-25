@@ -57,7 +57,10 @@ persist HTML or add any fetched content to a queue.
 - `new-item`: extract repeated items; identity priority is website ID → canonical URL → title/location/content fingerprint.
 - `keyword`: normalized token/phrase transitions from absent to present or present to absent.
 
-Rules are pure, versioned functions with fixture tests. A rule revision establishes a new baseline and does not alert immediately unless the member explicitly requests a test.
+Rules are pure, versioned functions with fixture tests. Members can configure text-change and new-item rules plus up
+to 25 normalized keyword phrases that alert when they appear or disappear. A saved rule revision resets to a pending
+baseline; the first successful check establishes that new baseline and does not alert immediately unless the member
+explicitly requests a test.
 
 ## Outcomes
 

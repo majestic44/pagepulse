@@ -17,5 +17,6 @@ Drizzle migrations in this directory are forward-only in production. Apply them 
 | `0008_stale_jetstream`           | Additive only. Disable scheduler reconciliation and restore a verified pre-migration backup if the schedule metadata must be removed; do not drop the added columns from a live production database.                                |
 | `0009_thick_loners`              | Additive only. Disable target configuration and preview routes, then restore a verified pre-migration backup if monitor targets must be removed; do not drop the table from a live production database.                             |
 | `0010_silent_apocalypse`         | Additive only. Disable repeated-list configuration and preview behavior, then restore a verified pre-migration backup if these target columns must be removed; do not drop live columns without an expand/migrate/contract release. |
+| `0011_faulty_lifeguard`          | Additive only. Disable rule configuration and restore a verified pre-migration backup if the rule table must be removed; do not drop the table from a live production database.                                                     |
 
 For later destructive schema changes, use expand/migrate/contract across releases and add a restore or rollback note to this table.

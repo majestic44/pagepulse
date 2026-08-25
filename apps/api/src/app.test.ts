@@ -68,6 +68,13 @@ function createAuthenticationDependencies(
         monitor,
         target: { repeatedList: null, selector: null, targetType: 'whole_page' as const },
       }),
+      getRules: vi.fn().mockResolvedValue({
+        monitor,
+        rules: {
+          baseline: { revision: 1, state: 'pending' as const },
+          configuration: { keyword: null, newItem: false, textChange: true },
+        },
+      }),
       list: vi.fn().mockResolvedValue([monitor]),
       pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
       resume: vi.fn().mockResolvedValue(monitor),
@@ -88,6 +95,13 @@ function createAuthenticationDependencies(
       updateTarget: vi.fn().mockResolvedValue({
         monitor: { ...monitor, revision: 2 },
         target: { repeatedList: null, selector: null, targetType: 'whole_page' as const },
+      }),
+      updateRules: vi.fn().mockResolvedValue({
+        monitor: { ...monitor, revision: 2 },
+        rules: {
+          baseline: { revision: 2, state: 'pending' as const },
+          configuration: { keyword: null, newItem: false, textChange: true },
+        },
       }),
       ...monitors,
     },
@@ -1217,6 +1231,66 @@ describe('authentication contract', () => {
     expect(throttled.headers['retry-after']).toBe('31');
     expect(throttled.json()).toEqual({ error: 'Too many preview attempts' });
     expect(throttledPreview.preview).not.toHaveBeenCalled();
+  });
+
+  it('reads and resets a monitor rule baseline when the member saves rules', async () => {
+    const rules = {
+      baseline: { revision: 1, state: 'pending' as const },
+      configuration: {
+        keyword: { phrases: ['Hiring freeze'], transition: 'appears' as const },
+        newItem: true,
+        textChange: false,
+      },
+    };
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        getRules: vi.fn().mockResolvedValue({ monitor, rules }),
+        updateRules: vi.fn().mockResolvedValue({
+          monitor: { ...monitor, revision: 2 },
+          rules: { ...rules, baseline: { revision: 2, state: 'pending' as const } },
+        }),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const configuration = rules.configuration;
+
+    const fetched = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/monitors/monitor-id/rules',
+      headers: { cookie },
+    });
+    const updated = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id/rules',
+      headers: { cookie, 'if-match': '"1"' },
+      payload: configuration,
+    });
+
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.headers.etag).toBe('"1"');
+    expect(fetched.json()).toEqual({ monitor: serializeMonitorForTest(monitor), rules });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.headers.etag).toBe('"2"');
+    expect(updated.json()).toEqual({
+      monitor: serializeMonitorForTest({ ...monitor, revision: 2 }),
+      rules: { ...rules, baseline: { revision: 2, state: 'pending' } },
+    });
+    expect(authentication.monitors.updateRules).toHaveBeenCalledWith(
+      activeSession.userId,
+      'monitor-id',
+      1,
+      configuration,
+    );
   });
 
   it('returns a safe target validation error without overwriting a newer monitor revision', async () => {
