@@ -68,13 +68,7 @@
       "indexes": {
         "account_tokens_user_type_state_idx": {
           "name": "account_tokens_user_type_state_idx",
-          "columns": [
-            "user_id",
-            "type",
-            "used_at",
-            "revoked_at",
-            "expires_at"
-          ],
+          "columns": ["user_id", "type", "used_at", "revoked_at", "expires_at"],
           "isUnique": false
         }
       },
@@ -83,12 +77,8 @@
           "name": "account_tokens_user_id_users_id_fk",
           "tableFrom": "account_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -96,17 +86,13 @@
       "compositePrimaryKeys": {
         "account_tokens_id": {
           "name": "account_tokens_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "account_tokens_token_hash_unique": {
           "name": "account_tokens_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "checkConstraint": {}
@@ -182,27 +168,17 @@
       "indexes": {
         "audit_events_expiry_idx": {
           "name": "audit_events_expiry_idx",
-          "columns": [
-            "expires_at",
-            "id"
-          ],
+          "columns": ["expires_at", "id"],
           "isUnique": false
         },
         "audit_events_created_idx": {
           "name": "audit_events_created_idx",
-          "columns": [
-            "created_at",
-            "id"
-          ],
+          "columns": ["created_at", "id"],
           "isUnique": false
         },
         "audit_events_target_idx": {
           "name": "audit_events_target_idx",
-          "columns": [
-            "target_type",
-            "target_id",
-            "created_at"
-          ],
+          "columns": ["target_type", "target_id", "created_at"],
           "isUnique": false
         }
       },
@@ -210,9 +186,7 @@
       "compositePrimaryKeys": {
         "audit_events_id": {
           "name": "audit_events_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -282,11 +256,7 @@
       "indexes": {
         "changes_monitor_state_created_idx": {
           "name": "changes_monitor_state_created_idx",
-          "columns": [
-            "monitor_id",
-            "state",
-            "created_at"
-          ],
+          "columns": ["monitor_id", "state", "created_at"],
           "isUnique": false
         }
       },
@@ -295,12 +265,8 @@
           "name": "changes_monitor_id_monitors_id_fk",
           "tableFrom": "changes",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -308,12 +274,8 @@
           "name": "changes_previous_snapshot_id_snapshots_id_fk",
           "tableFrom": "changes",
           "tableTo": "snapshots",
-          "columnsFrom": [
-            "previous_snapshot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["previous_snapshot_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -321,12 +283,8 @@
           "name": "changes_current_snapshot_id_snapshots_id_fk",
           "tableFrom": "changes",
           "tableTo": "snapshots",
-          "columnsFrom": [
-            "current_snapshot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["current_snapshot_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -334,17 +292,13 @@
       "compositePrimaryKeys": {
         "changes_id": {
           "name": "changes_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "changes_current_snapshot_id_unique": {
           "name": "changes_current_snapshot_id_unique",
-          "columns": [
-            "current_snapshot_id"
-          ]
+          "columns": ["current_snapshot_id"]
         }
       },
       "checkConstraint": {}
@@ -426,18 +380,12 @@
       "indexes": {
         "checks_monitor_completed_idx": {
           "name": "checks_monitor_completed_idx",
-          "columns": [
-            "monitor_id",
-            "completed_at"
-          ],
+          "columns": ["monitor_id", "completed_at"],
           "isUnique": false
         },
         "checks_expiry_idx": {
           "name": "checks_expiry_idx",
-          "columns": [
-            "expires_at",
-            "id"
-          ],
+          "columns": ["expires_at", "id"],
           "isUnique": false
         }
       },
@@ -446,12 +394,8 @@
           "name": "checks_monitor_id_monitors_id_fk",
           "tableFrom": "checks",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -459,9 +403,7 @@
       "compositePrimaryKeys": {
         "checks_id": {
           "name": "checks_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -531,11 +473,7 @@
       "indexes": {
         "invitations_email_state_idx": {
           "name": "invitations_email_state_idx",
-          "columns": [
-            "email",
-            "redeemed_at",
-            "revoked_at"
-          ],
+          "columns": ["email", "redeemed_at", "revoked_at"],
           "isUnique": false
         }
       },
@@ -544,12 +482,8 @@
           "name": "invitations_invited_by_user_id_users_id_fk",
           "tableFrom": "invitations",
           "tableTo": "users",
-          "columnsFrom": [
-            "invited_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invited_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -557,17 +491,13 @@
       "compositePrimaryKeys": {
         "invitations_id": {
           "name": "invitations_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "invitations_token_hash_unique": {
           "name": "invitations_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "checkConstraint": {}
@@ -627,12 +557,8 @@
           "name": "monitor_rules_monitor_id_monitors_id_fk",
           "tableFrom": "monitor_rules",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -640,9 +566,7 @@
       "compositePrimaryKeys": {
         "monitor_rules_monitor_id": {
           "name": "monitor_rules_monitor_id",
-          "columns": [
-            "monitor_id"
-          ]
+          "columns": ["monitor_id"]
         }
       },
       "uniqueConstraints": {},
@@ -737,9 +661,7 @@
       "indexes": {
         "monitor_schedules_revision_idx": {
           "name": "monitor_schedules_revision_idx",
-          "columns": [
-            "monitor_revision"
-          ],
+          "columns": ["monitor_revision"],
           "isUnique": false
         }
       },
@@ -748,12 +670,8 @@
           "name": "monitor_schedules_monitor_id_monitors_id_fk",
           "tableFrom": "monitor_schedules",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -761,9 +679,7 @@
       "compositePrimaryKeys": {
         "monitor_schedules_monitor_id": {
           "name": "monitor_schedules_monitor_id",
-          "columns": [
-            "monitor_id"
-          ]
+          "columns": ["monitor_id"]
         }
       },
       "uniqueConstraints": {},
@@ -831,12 +747,8 @@
           "name": "monitor_targets_monitor_id_monitors_id_fk",
           "tableFrom": "monitor_targets",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -844,9 +756,7 @@
       "compositePrimaryKeys": {
         "monitor_targets_monitor_id": {
           "name": "monitor_targets_monitor_id",
-          "columns": [
-            "monitor_id"
-          ]
+          "columns": ["monitor_id"]
         }
       },
       "uniqueConstraints": {},
@@ -911,10 +821,7 @@
       "indexes": {
         "monitors_owner_state_idx": {
           "name": "monitors_owner_state_idx",
-          "columns": [
-            "owner_id",
-            "state"
-          ],
+          "columns": ["owner_id", "state"],
           "isUnique": false
         }
       },
@@ -923,12 +830,8 @@
           "name": "monitors_owner_id_users_id_fk",
           "tableFrom": "monitors",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -936,9 +839,7 @@
       "compositePrimaryKeys": {
         "monitors_id": {
           "name": "monitors_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1009,19 +910,12 @@
       "indexes": {
         "outbox_events_pending_idx": {
           "name": "outbox_events_pending_idx",
-          "columns": [
-            "published_at",
-            "available_at",
-            "created_at"
-          ],
+          "columns": ["published_at", "available_at", "created_at"],
           "isUnique": false
         },
         "outbox_events_subject_idx": {
           "name": "outbox_events_subject_idx",
-          "columns": [
-            "subject_type",
-            "subject_id"
-          ],
+          "columns": ["subject_type", "subject_id"],
           "isUnique": false
         }
       },
@@ -1029,9 +923,7 @@
       "compositePrimaryKeys": {
         "outbox_events_id": {
           "name": "outbox_events_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1094,12 +986,7 @@
       "indexes": {
         "owner_setup_tokens_owner_state_idx": {
           "name": "owner_setup_tokens_owner_state_idx",
-          "columns": [
-            "owner_id",
-            "used_at",
-            "revoked_at",
-            "expires_at"
-          ],
+          "columns": ["owner_id", "used_at", "revoked_at", "expires_at"],
           "isUnique": false
         }
       },
@@ -1108,12 +995,8 @@
           "name": "owner_setup_tokens_owner_id_users_id_fk",
           "tableFrom": "owner_setup_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1121,17 +1004,13 @@
       "compositePrimaryKeys": {
         "owner_setup_tokens_id": {
           "name": "owner_setup_tokens_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "owner_setup_tokens_token_hash_unique": {
           "name": "owner_setup_tokens_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "checkConstraint": {}
@@ -1188,17 +1067,13 @@
       "compositePrimaryKeys": {
         "schema_compatibility_schema_version": {
           "name": "schema_compatibility_schema_version",
-          "columns": [
-            "schema_version"
-          ]
+          "columns": ["schema_version"]
         }
       },
       "uniqueConstraints": {
         "schema_compatibility_migration_id_unique": {
           "name": "schema_compatibility_migration_id_unique",
-          "columns": [
-            "migration_id"
-          ]
+          "columns": ["migration_id"]
         }
       },
       "checkConstraint": {}
@@ -1289,12 +1164,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1302,17 +1173,13 @@
       "compositePrimaryKeys": {
         "sessions_id": {
           "name": "sessions_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "sessions_token_hash_unique": {
           "name": "sessions_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "checkConstraint": {}
@@ -1395,18 +1262,12 @@
       "indexes": {
         "snapshots_expiry_idx": {
           "name": "snapshots_expiry_idx",
-          "columns": [
-            "expires_at",
-            "id"
-          ],
+          "columns": ["expires_at", "id"],
           "isUnique": false
         },
         "snapshots_monitor_created_idx": {
           "name": "snapshots_monitor_created_idx",
-          "columns": [
-            "monitor_id",
-            "created_at"
-          ],
+          "columns": ["monitor_id", "created_at"],
           "isUnique": false
         }
       },
@@ -1415,12 +1276,8 @@
           "name": "snapshots_check_id_checks_id_fk",
           "tableFrom": "snapshots",
           "tableTo": "checks",
-          "columnsFrom": [
-            "check_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["check_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1428,12 +1285,8 @@
           "name": "snapshots_monitor_id_monitors_id_fk",
           "tableFrom": "snapshots",
           "tableTo": "monitors",
-          "columnsFrom": [
-            "monitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["monitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1441,23 +1294,17 @@
       "compositePrimaryKeys": {
         "snapshots_id": {
           "name": "snapshots_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "snapshots_check_id_unique": {
           "name": "snapshots_check_id_unique",
-          "columns": [
-            "check_id"
-          ]
+          "columns": ["check_id"]
         },
         "snapshots_storage_key_unique": {
           "name": "snapshots_storage_key_unique",
-          "columns": [
-            "storage_key"
-          ]
+          "columns": ["storage_key"]
         }
       },
       "checkConstraint": {}
@@ -1501,12 +1348,8 @@
           "name": "totp_enrollments_user_id_users_id_fk",
           "tableFrom": "totp_enrollments",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1514,9 +1357,7 @@
       "compositePrimaryKeys": {
         "totp_enrollments_user_id": {
           "name": "totp_enrollments_user_id",
-          "columns": [
-            "user_id"
-          ]
+          "columns": ["user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1579,12 +1420,7 @@
       "indexes": {
         "totp_login_challenges_user_state_idx": {
           "name": "totp_login_challenges_user_state_idx",
-          "columns": [
-            "user_id",
-            "used_at",
-            "revoked_at",
-            "expires_at"
-          ],
+          "columns": ["user_id", "used_at", "revoked_at", "expires_at"],
           "isUnique": false
         }
       },
@@ -1593,12 +1429,8 @@
           "name": "totp_login_challenges_user_id_users_id_fk",
           "tableFrom": "totp_login_challenges",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1606,17 +1438,13 @@
       "compositePrimaryKeys": {
         "totp_login_challenges_id": {
           "name": "totp_login_challenges_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "totp_login_challenges_token_hash_unique": {
           "name": "totp_login_challenges_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "checkConstraint": {}
@@ -1666,12 +1494,8 @@
           "name": "totp_methods_user_id_users_id_fk",
           "tableFrom": "totp_methods",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1679,9 +1503,7 @@
       "compositePrimaryKeys": {
         "totp_methods_user_id": {
           "name": "totp_methods_user_id",
-          "columns": [
-            "user_id"
-          ]
+          "columns": ["user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1730,18 +1552,12 @@
       "indexes": {
         "totp_recovery_codes_user_state_idx": {
           "name": "totp_recovery_codes_user_state_idx",
-          "columns": [
-            "user_id",
-            "used_at"
-          ],
+          "columns": ["user_id", "used_at"],
           "isUnique": false
         },
         "totp_recovery_codes_user_hash_idx": {
           "name": "totp_recovery_codes_user_hash_idx",
-          "columns": [
-            "user_id",
-            "code_hash"
-          ],
+          "columns": ["user_id", "code_hash"],
           "isUnique": false
         }
       },
@@ -1750,12 +1566,8 @@
           "name": "totp_recovery_codes_user_id_users_id_fk",
           "tableFrom": "totp_recovery_codes",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1763,9 +1575,7 @@
       "compositePrimaryKeys": {
         "totp_recovery_codes_id": {
           "name": "totp_recovery_codes_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1859,10 +1669,7 @@
       "indexes": {
         "users_deletion_deadline_idx": {
           "name": "users_deletion_deadline_idx",
-          "columns": [
-            "status",
-            "deletion_deadline"
-          ],
+          "columns": ["status", "deletion_deadline"],
           "isUnique": false
         }
       },
@@ -1870,17 +1677,13 @@
       "compositePrimaryKeys": {
         "users_id": {
           "name": "users_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "checkConstraint": {}
