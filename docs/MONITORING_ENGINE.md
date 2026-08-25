@@ -9,8 +9,8 @@ Use the HTTP worker for HTML, JSON and RSS unless the monitor requires rendered 
 - Only `http` and `https` URLs.
 - Resolve every initial host and redirect; reject loopback, link-local, multicast, metadata, private, reserved and non-routable addresses.
 - Revalidate DNS at connection time to mitigate rebinding.
-- Restrict redirects, bytes, decompression ratio, content types and duration.
-- Use a PagePulse user agent and configurable per-domain concurrency.
+- The shared HTTP transport permits only GET over HTTP(S), follows at most three validated redirects by default, disables response compression, and bounds response bytes and request duration. It supplies the `PagePulse/1.0 (+https://pagepulse.local)` user agent without exposing target URLs in errors or logs.
+- Source adapters apply their own content-type restrictions on top of the shared transport; per-domain concurrency arrives with scheduler dispatch.
 - Apply exponential backoff with jitter for temporary network and 5xx failures.
 - Never bypass TLS failures, CAPTCHA, bot challenges, paywalls or access controls.
 
