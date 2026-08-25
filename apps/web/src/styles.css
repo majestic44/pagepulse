@@ -3,21 +3,29 @@
   color-scheme: light;
   --bg: #f7fafb;
   --panel: #fff;
+  --surface-subtle: #edf4f5;
   --text: #0b2342;
   --muted: #5e7084;
   --line: #dce7ea;
   --accent: #078589;
   --accent-soft: #dff4f2;
+  --accent-contrast: #fff;
+  --focus-ring: #035c60;
+  --danger: #a52a2a;
 }
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #091118;
   --panel: #101a22;
+  --surface-subtle: #182630;
   --text: #f2f5f7;
   --muted: #94a2ae;
   --line: #27343e;
-  --accent: #8668ef;
+  --accent: #a990ff;
   --accent-soft: #292342;
+  --accent-contrast: #110b29;
+  --focus-ring: #c6b7ff;
+  --danger: #ff9b9b;
 }
 * {
   box-sizing: border-box;
@@ -39,6 +47,14 @@ button {
 button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 .shell {
   min-height: 100vh;
@@ -73,6 +89,72 @@ button:disabled {
 .account-link {
   margin-left: auto;
   margin-right: 1rem;
+}
+.theme-control {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.8rem;
+  font-weight: 750;
+  gap: 0.45rem;
+}
+.theme-control select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  color: var(--text);
+  font: inherit;
+  padding: 0.55rem 0.65rem;
+}
+.theme-dialog-backdrop {
+  align-items: center;
+  background: rgb(9 17 24 / 0.62);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1.25rem;
+  position: fixed;
+  z-index: 10;
+}
+.theme-dialog {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 0.28);
+  max-width: 37rem;
+  padding: clamp(1.5rem, 5vw, 2.5rem);
+}
+.theme-dialog h2 {
+  margin: 0.55rem 0 0.8rem;
+}
+.theme-dialog > p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0;
+}
+.theme-option-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 1.5rem;
+}
+.theme-option-grid button {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 7rem;
+  text-align: left;
+}
+.theme-option-grid button:hover {
+  background: var(--surface-subtle);
+  border-color: var(--accent);
+}
+.theme-option-grid button strong {
+  color: var(--text);
+}
+.theme-option-grid button span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 section {
   width: min(980px, calc(100% - 2.5rem));
@@ -286,7 +368,7 @@ h3 {
 .session-actions button {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   justify-self: start;
 }
 .text-button {
@@ -307,8 +389,8 @@ h3 {
   margin-left: 0.7rem;
 }
 .danger-button {
-  border-color: #a52a2a !important;
-  color: #a52a2a !important;
+  border-color: var(--danger) !important;
+  color: var(--danger) !important;
 }
 .totp-panel {
   border-top: 1px solid var(--line);
@@ -430,15 +512,34 @@ h3 {
 }
 @media (max-width: 600px) {
   .shell header {
-    height: 4rem;
+    gap: 0.5rem;
+    height: auto;
+    min-height: 4rem;
+    flex-wrap: wrap;
+    padding-bottom: 0.75rem;
+    padding-top: 0.75rem;
   }
-  .shell header button {
-    font-size: 0.8rem;
-    padding: 0.6rem;
+  .shell header .brand {
+    flex-basis: 100%;
   }
   .account-link {
     font-size: 0.8rem;
+    margin-left: 0;
     margin-right: 0.5rem;
+  }
+  .theme-control span {
+    clip: rect(0 0 0 0);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+  .theme-option-grid {
+    grid-template-columns: 1fr;
+  }
+  .theme-option-grid button {
+    min-height: auto;
   }
   .brand {
     font-size: 1.15rem;
