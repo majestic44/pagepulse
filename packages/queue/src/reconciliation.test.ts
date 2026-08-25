@@ -91,7 +91,12 @@ describe('scheduler reconciliation', () => {
           version: 1,
         },
         name: QueueNames.monitorSchedule,
-        opts: { removeOnComplete: 1_000, removeOnFail: 1_000 },
+        opts: {
+          attempts: 5,
+          backoff: { delay: 1_000, type: 'exponential' },
+          removeOnComplete: 1_000,
+          removeOnFail: 1_000,
+        },
       },
     );
     expect(removeJobScheduler).toHaveBeenCalledWith('monitor-c3RhbGU-r1');

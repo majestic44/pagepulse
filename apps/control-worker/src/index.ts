@@ -13,6 +13,7 @@ import {
   createQueue,
   createRedisConnection,
   createValidatedWorker,
+  dispatchScheduledPageFetch,
   installGracefulShutdown,
   QueueNames,
   type QueueName,
@@ -22,7 +23,7 @@ import {
 import { createSchedulerReconciler, runInitialWorkerReconciliation } from './scheduler.js';
 
 const queueNamesByRole: Record<Environment['WORKER_ROLE'], ReadonlyArray<QueueName>> = {
-  scheduler: [QueueNames.monitorSchedule],
+  scheduler: [],
   'change-detection': [QueueNames.changeDetection],
   notification: [QueueNames.notification, QueueNames.digest],
   maintenance: [QueueNames.maintenance],
@@ -35,7 +36,7 @@ async function startControlWorker() {
   const connection = createRedisConnection(environment.REDIS_URL);
   connection.on('error', (error) => logger.error({ error }, 'Redis connection failed'));
 
-  const workers = queueNamesByRole[role].map((queueName) => {
+  const workers: QueueResource[] = queueNamesByRole[role].map((queueName) => {
     const worker = createValidatedWorker(queueName, connection, environment.QUEUE_PREFIX, (job) => {
       logger.info(
         {
@@ -69,6 +70,34 @@ async function startControlWorker() {
       connection,
       environment.QUEUE_PREFIX,
     );
+    const pageFetchQueue = createQueue(QueueNames.pageFetch, connection, environment.QUEUE_PREFIX);
+    const scheduleWorker = createValidatedWorker(
+      QueueNames.monitorSchedule,
+      connection,
+      environment.QUEUE_PREFIX,
+      async (job) => {
+        const scheduled = await dispatchScheduledPageFetch(
+          pageFetchQueue,
+          job.data,
+          String(job.id),
+        );
+        logger.info(
+          {
+            correlationId: job.data.correlationId,
+            jobId: job.id,
+            monitorId: job.data.monitorId,
+          },
+          'Scheduled monitor check dispatched',
+        );
+        return { dispatchedJobId: scheduled.id ?? null };
+      },
+      { concurrency: 1 },
+    );
+    scheduleWorker.on('error', (error) =>
+      logger.error({ error }, 'Schedule dispatch worker failed'),
+    );
+    workers.push(scheduleWorker);
+    resources.push(scheduleWorker);
     const reconcile = createSchedulerReconciler({
       listActiveSchedules: () => listActiveMonitorSchedules(database),
       listPendingOutboxEvents: () => listPendingOutboxEvents(database),
@@ -87,7 +116,7 @@ async function startControlWorker() {
         'Scheduler reconciliation completed',
       );
     };
-    resources.push(monitorScheduleQueue, notificationQueue, {
+    resources.push(monitorScheduleQueue, notificationQueue, pageFetchQueue, {
       close: async () => {
         if (reconciliationTimer) {
           clearInterval(reconciliationTimer);

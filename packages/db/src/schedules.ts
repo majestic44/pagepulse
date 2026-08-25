@@ -220,3 +220,28 @@ export async function listActiveMonitorSchedules(database: Database): Promise<Mo
       and(eq(monitors.state, 'active'), eq(monitorSchedules.monitorRevision, monitors.revision)),
     );
 }
+
+export type ScheduledMonitorFetchTarget = Readonly<{
+  id: string;
+  revision: number;
+  url: string;
+}>;
+
+export async function getActiveMonitorForScheduledFetch(
+  database: Database,
+  monitorId: string,
+  monitorRevision: number,
+): Promise<ScheduledMonitorFetchTarget | null> {
+  const rows = await database
+    .select({ id: monitors.id, revision: monitors.revision, url: monitors.url })
+    .from(monitors)
+    .where(
+      and(
+        eq(monitors.id, monitorId),
+        eq(monitors.revision, monitorRevision),
+        eq(monitors.state, 'active'),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
