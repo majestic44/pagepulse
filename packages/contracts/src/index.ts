@@ -383,8 +383,26 @@ export const MonitorTargetType = Type.Union([
   Type.Literal('css_selector'),
 ]);
 
+export const MonitorRepeatedListConfiguration = Type.Object(
+  {
+    identitySelector: Type.String({ minLength: 1, maxLength: 512 }),
+    ignoreSelectors: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 512 }), { maxItems: 10 }),
+    ),
+    itemSelector: Type.String({ minLength: 1, maxLength: 512 }),
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorRepeatedListSummary = Type.Object({
+  identitySelector: Type.String({ minLength: 1, maxLength: 512 }),
+  ignoreSelectors: Type.Array(Type.String({ minLength: 1, maxLength: 512 }), { maxItems: 10 }),
+  itemSelector: Type.String({ minLength: 1, maxLength: 512 }),
+});
+
 export const MonitorTargetConfiguration = Type.Object(
   {
+    repeatedList: Type.Optional(MonitorRepeatedListConfiguration),
     selector: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     targetType: MonitorTargetType,
   },
@@ -392,6 +410,7 @@ export const MonitorTargetConfiguration = Type.Object(
 );
 
 export const MonitorTargetSummary = Type.Object({
+  repeatedList: Type.Union([MonitorRepeatedListSummary, Type.Null()]),
   selector: Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
   targetType: MonitorTargetType,
 });
@@ -403,6 +422,31 @@ export const MonitorTargetResponse = Type.Object({
 
 export const MonitorTargetPreview = Type.Object({
   matchCount: Type.Integer({ minimum: 1 }),
+  repeatedList: Type.Union([
+    Type.Object({
+      itemCount: Type.Integer({ minimum: 1, maximum: 100_000 }),
+      items: Type.Array(
+        Type.Object({
+          identity: Type.String({ maxLength: 1_000 }),
+          text: Type.String({ maxLength: 1_000 }),
+        }),
+        { maxItems: 5 },
+      ),
+      truncated: Type.Boolean(),
+    }),
+    Type.Null(),
+  ]),
+  repeatedListCandidates: Type.Array(
+    Type.Object({
+      identitySelectorSuggestions: Type.Array(Type.String({ minLength: 1, maxLength: 512 }), {
+        maxItems: 5,
+      }),
+      itemCount: Type.Integer({ minimum: 2, maximum: 100_000 }),
+      itemSelector: Type.String({ minLength: 1, maxLength: 512 }),
+      sampleTexts: Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), { maxItems: 3 }),
+    }),
+    { maxItems: 6 },
+  ),
   text: Type.String({ maxLength: 20_000 }),
   truncated: Type.Boolean(),
 });

@@ -7,6 +7,11 @@ import { isIP, type LookupFunction } from 'node:net';
 import { load } from 'cheerio';
 
 const MAXIMUM_SELECTOR_LENGTH = 512;
+const MAXIMUM_REPEATED_LIST_CANDIDATES = 6;
+const MAXIMUM_REPEATED_LIST_PARENT_ELEMENTS = 128;
+const MAXIMUM_REPEATED_LIST_IGNORE_SELECTORS = 10;
+const MAXIMUM_REPEATED_LIST_PREVIEW_ITEMS = 5;
+const MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS = 1_000;
 const DEFAULT_PREVIEW_MAX_BYTES = 512 * 1_024;
 const DEFAULT_PREVIEW_MAX_CHARACTERS = 20_000;
 const DEFAULT_PREVIEW_MAX_REDIRECTS = 3;
@@ -15,18 +20,52 @@ const pagePulseUserAgent = 'PagePulse/1.0 (+https://pagepulse.local)';
 
 export type MonitorTargetType = 'css_selector' | 'whole_page';
 
+export type MonitorRepeatedListConfiguration = Readonly<{
+  identitySelector: string;
+  ignoreSelectors?: ReadonlyArray<string> | undefined;
+  itemSelector: string;
+}>;
+
 export type MonitorTargetConfiguration = Readonly<{
+  repeatedList?: MonitorRepeatedListConfiguration | undefined;
   selector?: string | undefined;
   targetType: MonitorTargetType;
 }>;
 
+export type NormalizedMonitorRepeatedListConfiguration = Readonly<{
+  identitySelector: string;
+  ignoreSelectors: ReadonlyArray<string>;
+  itemSelector: string;
+}>;
+
 export type NormalizedMonitorTargetConfiguration = Readonly<{
+  repeatedList: NormalizedMonitorRepeatedListConfiguration | null;
   selector: string | null;
   targetType: MonitorTargetType;
 }>;
 
+export type RepeatedListCandidate = Readonly<{
+  identitySelectorSuggestions: ReadonlyArray<string>;
+  itemCount: number;
+  itemSelector: string;
+  sampleTexts: ReadonlyArray<string>;
+}>;
+
+export type RepeatedListItemPreview = Readonly<{
+  identity: string;
+  text: string;
+}>;
+
+export type RepeatedListPreview = Readonly<{
+  itemCount: number;
+  items: ReadonlyArray<RepeatedListItemPreview>;
+  truncated: boolean;
+}>;
+
 export type HtmlExtractionPreview = Readonly<{
   matchCount: number;
+  repeatedList: RepeatedListPreview | null;
+  repeatedListCandidates: ReadonlyArray<RepeatedListCandidate>;
   text: string;
   truncated: boolean;
 }>;
@@ -102,39 +141,78 @@ function containsControlCharacter(value: string) {
   });
 }
 
-function validateCssSelector(selector: string) {
+function validateCssSelector(selector: string, field: string) {
   try {
     load('<main></main>')(selector);
   } catch {
-    throw new MonitorTargetValidationError('selector is not valid CSS');
+    throw new MonitorTargetValidationError(`${field} is not valid CSS`);
   }
   return selector;
 }
 
-export function normalizeMonitorTargetConfiguration(
-  configuration: MonitorTargetConfiguration,
-): NormalizedMonitorTargetConfiguration {
-  if (configuration.targetType === 'whole_page') {
-    if (configuration.selector !== undefined) {
-      throw new MonitorTargetValidationError('whole-page targets cannot include a selector');
-    }
-    return { selector: null, targetType: 'whole_page' };
+function normalizeCssSelector(value: unknown, field: string) {
+  if (typeof value !== 'string') {
+    throw new MonitorTargetValidationError(`${field} is required`);
   }
-  if (configuration.targetType !== 'css_selector') {
-    throw new MonitorTargetValidationError('targetType must be whole_page or css_selector');
-  }
-  if (typeof configuration.selector !== 'string') {
-    throw new MonitorTargetValidationError('CSS selector targets require a selector');
-  }
-  const selector = configuration.selector.trim();
+  const selector = value.trim();
   if (
     selector.length === 0 ||
     selector.length > MAXIMUM_SELECTOR_LENGTH ||
     containsControlCharacter(selector)
   ) {
-    throw new MonitorTargetValidationError('selector is invalid');
+    throw new MonitorTargetValidationError(`${field} is invalid`);
   }
-  return { selector: validateCssSelector(selector), targetType: 'css_selector' };
+  return validateCssSelector(selector, field);
+}
+
+function normalizeRepeatedListConfiguration(
+  configuration: MonitorRepeatedListConfiguration | undefined,
+): NormalizedMonitorRepeatedListConfiguration | null {
+  if (configuration === undefined) {
+    return null;
+  }
+  if (configuration === null || typeof configuration !== 'object' || Array.isArray(configuration)) {
+    throw new MonitorTargetValidationError('repeatedList is invalid');
+  }
+  const itemSelector = normalizeCssSelector(
+    configuration.itemSelector,
+    'repeated list itemSelector',
+  );
+  const identitySelector = normalizeCssSelector(
+    configuration.identitySelector,
+    'repeated list identitySelector',
+  );
+  const values = configuration.ignoreSelectors ?? [];
+  if (!Array.isArray(values) || values.length > MAXIMUM_REPEATED_LIST_IGNORE_SELECTORS) {
+    throw new MonitorTargetValidationError('repeated list ignoreSelectors is invalid');
+  }
+  const ignoreSelectors = values.map((value) =>
+    normalizeCssSelector(value, 'repeated list ignore selector'),
+  );
+  if (new Set(ignoreSelectors).size !== ignoreSelectors.length) {
+    throw new MonitorTargetValidationError('repeated list ignore selectors must be unique');
+  }
+  if (ignoreSelectors.includes(identitySelector)) {
+    throw new MonitorTargetValidationError('repeated list identity selector cannot be ignored');
+  }
+  return { identitySelector, ignoreSelectors, itemSelector };
+}
+
+export function normalizeMonitorTargetConfiguration(
+  configuration: MonitorTargetConfiguration,
+): NormalizedMonitorTargetConfiguration {
+  const repeatedList = normalizeRepeatedListConfiguration(configuration.repeatedList);
+  if (configuration.targetType === 'whole_page') {
+    if (configuration.selector !== undefined) {
+      throw new MonitorTargetValidationError('whole-page targets cannot include a selector');
+    }
+    return { repeatedList, selector: null, targetType: 'whole_page' };
+  }
+  if (configuration.targetType !== 'css_selector') {
+    throw new MonitorTargetValidationError('targetType must be whole_page or css_selector');
+  }
+  const selector = normalizeCssSelector(configuration.selector, 'selector');
+  return { repeatedList, selector, targetType: 'css_selector' };
 }
 
 function ipv4AsNumber(address: string) {
@@ -405,7 +483,9 @@ export function extractHtmlTarget(
   }
   const document = load(html);
   document('script, style, noscript, template').remove();
-  document('article, blockquote, br, div, h1, h2, h3, h4, h5, h6, li, p, section').append(' ');
+  document(
+    'a, article, blockquote, br, div, h1, h2, h3, h4, h5, h6, li, p, section, span, td, th',
+  ).append(' ');
   const matches =
     target.targetType === 'whole_page'
       ? document('body').toArray()
@@ -413,9 +493,149 @@ export function extractHtmlTarget(
   if (matches.length === 0) {
     throw new MonitorPreviewError('selector_no_match');
   }
+  const targetElements = new Set(matches);
+  const findWithinTarget = (selector: string) =>
+    document(selector)
+      .toArray()
+      .filter(
+        (element) =>
+          targetElements.has(element) ||
+          document(element)
+            .parents()
+            .toArray()
+            .some((parent) => targetElements.has(parent)),
+      );
+  const elementSignature = (element: (typeof matches)[number]) => {
+    const tagName = document(element).prop('tagName');
+    if (typeof tagName !== 'string' || tagName.length === 0) {
+      return undefined;
+    }
+    const stableClasses = (document(element).attr('class') ?? '')
+      .split(/\s+/u)
+      .filter((className) => /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(className))
+      .slice(0, 2);
+    return `${tagName.toLowerCase()}${stableClasses.map((className) => `.${className}`).join('')}`;
+  };
+  const identityValue = (item: (typeof matches)[number], selector: string) => {
+    const identityRegion = document(item).find(selector).first();
+    if (identityRegion.length === 0) {
+      return undefined;
+    }
+    const text = normalizeText(identityRegion.text());
+    if (text.length > 0) {
+      return text;
+    }
+    return ['data-id', 'data-key', 'id', 'href', 'value', 'content']
+      .map((attribute) => identityRegion.attr(attribute))
+      .map((value) => (value === undefined ? '' : normalizeText(value)))
+      .find((value) => value.length > 0);
+  };
+  const visibleItemText = (item: (typeof matches)[number]) => {
+    const copy = document(item).clone();
+    target.repeatedList?.ignoreSelectors.forEach((selector) => copy.find(selector).remove());
+    return normalizeText(copy.text());
+  };
+  const repeatedListCandidates = (() => {
+    const candidates = new Map<string, RepeatedListCandidate>();
+    const parents = [
+      ...matches,
+      ...findWithinTarget('*').filter((element) => document(element).children().length > 0),
+    ];
+    for (const parent of [...new Set(parents)].slice(0, MAXIMUM_REPEATED_LIST_PARENT_ELEMENTS)) {
+      const groups = new Map<string, Array<(typeof matches)[number]>>();
+      document(parent)
+        .children()
+        .each((_index, child) => {
+          const signature = elementSignature(child);
+          if (!signature) {
+            return;
+          }
+          const group = groups.get(signature) ?? [];
+          group.push(child);
+          groups.set(signature, group);
+        });
+      const parentSignature = elementSignature(parent);
+      for (const [itemSignature, groupedItems] of groups) {
+        if (groupedItems.length < 2) {
+          continue;
+        }
+        const itemSelector = parentSignature
+          ? `${parentSignature} > ${itemSignature}`
+          : itemSignature;
+        if (!candidates.has(itemSelector) && candidates.size >= MAXIMUM_REPEATED_LIST_CANDIDATES) {
+          continue;
+        }
+        const items = findWithinTarget(itemSelector);
+        if (items.length < 2) {
+          continue;
+        }
+        const identitySelectorSuggestions = [
+          'a[href]',
+          '[itemprop="name"]',
+          '.title',
+          'h1, h2, h3, h4, h5, h6',
+          '[data-id]',
+        ].filter((selector) => items.every((item) => identityValue(item, selector) !== undefined));
+        const candidate = {
+          identitySelectorSuggestions,
+          itemCount: items.length,
+          itemSelector,
+          sampleTexts: items
+            .slice(0, 3)
+            .map((item) =>
+              normalizeText(document(item).text()).slice(
+                0,
+                MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS,
+              ),
+            )
+            .filter((text) => text.length > 0),
+        } satisfies RepeatedListCandidate;
+        const existing = candidates.get(itemSelector);
+        if (!existing || candidate.itemCount > existing.itemCount) {
+          candidates.set(itemSelector, candidate);
+        }
+      }
+    }
+    return [...candidates.values()]
+      .sort(
+        (left, right) =>
+          right.itemCount - left.itemCount || left.itemSelector.localeCompare(right.itemSelector),
+      )
+      .slice(0, MAXIMUM_REPEATED_LIST_CANDIDATES);
+  })();
+  const repeatedList = (() => {
+    if (!target.repeatedList) {
+      return null;
+    }
+    const items = findWithinTarget(target.repeatedList.itemSelector);
+    if (
+      items.length === 0 ||
+      items.some((item) => identityValue(item, target.repeatedList!.identitySelector) === undefined)
+    ) {
+      throw new MonitorPreviewError('selector_no_match');
+    }
+    let truncated = items.length > MAXIMUM_REPEATED_LIST_PREVIEW_ITEMS;
+    const previews = items.slice(0, MAXIMUM_REPEATED_LIST_PREVIEW_ITEMS).map((item) => {
+      const identity = identityValue(item, target.repeatedList!.identitySelector)!;
+      const text = visibleItemText(item);
+      if (
+        identity.length > MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS ||
+        text.length > MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS
+      ) {
+        truncated = true;
+      }
+      return {
+        identity: identity.slice(0, MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS),
+        text: text.slice(0, MAXIMUM_REPEATED_LIST_SAMPLE_CHARACTERS),
+      } satisfies RepeatedListItemPreview;
+    });
+    return { itemCount: items.length, items: previews, truncated } satisfies RepeatedListPreview;
+  })();
   const text = normalizeText(matches.map((element) => document(element).text()).join(' '));
   return {
     matchCount: matches.length,
+    repeatedList,
+    repeatedListCandidates,
     text: text.slice(0, maxCharacters),
     truncated: text.length > maxCharacters,
   };

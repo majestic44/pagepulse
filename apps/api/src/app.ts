@@ -365,6 +365,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
     timeZone: schedule.timeZone,
   });
   const serializeMonitorTarget = (target: MonitorTarget) => ({
+    repeatedList: target.repeatedList,
     selector: target.selector,
     targetType: target.targetType,
   });

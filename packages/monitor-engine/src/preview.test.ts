@@ -13,6 +13,7 @@ import {
 describe('monitor target configuration', () => {
   it('normalizes valid whole-page and CSS selector targets', () => {
     expect(normalizeMonitorTargetConfiguration({ targetType: 'whole_page' })).toEqual({
+      repeatedList: null,
       selector: null,
       targetType: 'whole_page',
     });
@@ -22,6 +23,7 @@ describe('monitor target configuration', () => {
         targetType: 'css_selector',
       }),
     ).toEqual({
+      repeatedList: null,
       selector: 'main > article',
       targetType: 'css_selector',
     });
@@ -37,6 +39,22 @@ describe('monitor target configuration', () => {
     expect(() =>
       normalizeMonitorTargetConfiguration({ selector: 'main', targetType: 'whole_page' }),
     ).toThrow(MonitorTargetValidationError);
+    expect(() =>
+      normalizeMonitorTargetConfiguration({
+        repeatedList: { identitySelector: 'a[href]', itemSelector: 'main[' },
+        targetType: 'whole_page',
+      }),
+    ).toThrow(MonitorTargetValidationError);
+    expect(() =>
+      normalizeMonitorTargetConfiguration({
+        repeatedList: {
+          identitySelector: '.title',
+          ignoreSelectors: ['.meta', '.meta'],
+          itemSelector: 'article',
+        },
+        targetType: 'whole_page',
+      }),
+    ).toThrow(MonitorTargetValidationError);
   });
 });
 
@@ -49,16 +67,55 @@ describe('HTML target extraction', () => {
   `;
 
   it('extracts normalized whole-page and selector text without executable regions', () => {
-    expect(extractHtmlTarget(html, { targetType: 'whole_page' })).toEqual({
+    expect(extractHtmlTarget(html, { targetType: 'whole_page' })).toMatchObject({
       matchCount: 1,
+      repeatedList: null,
       text: 'First role Second role',
       truncated: false,
     });
     expect(
       extractHtmlTarget(html, { selector: 'article.job', targetType: 'css_selector' }),
-    ).toEqual({
+    ).toMatchObject({
       matchCount: 2,
+      repeatedList: null,
       text: 'First role Second role',
+      truncated: false,
+    });
+  });
+
+  it('detects repeated candidates and previews member-selected identity and ignore regions', () => {
+    const listingHtml = `
+      <html><body><main><ul class="openings">
+        <li class="job"><a href="/roles/one">First role</a><span class="meta">Remote</span></li>
+        <li class="job"><a href="/roles/two">Second role</a><span class="meta">Hybrid</span></li>
+      </ul></main></body></html>
+    `;
+
+    const detected = extractHtmlTarget(listingHtml, { targetType: 'whole_page' });
+    expect(detected.repeatedListCandidates).toEqual([
+      {
+        identitySelectorSuggestions: ['a[href]'],
+        itemCount: 2,
+        itemSelector: 'ul.openings > li.job',
+        sampleTexts: ['First role Remote', 'Second role Hybrid'],
+      },
+    ]);
+
+    expect(
+      extractHtmlTarget(listingHtml, {
+        repeatedList: {
+          identitySelector: 'a[href]',
+          ignoreSelectors: ['.meta'],
+          itemSelector: 'ul.openings > li.job',
+        },
+        targetType: 'whole_page',
+      }).repeatedList,
+    ).toEqual({
+      itemCount: 2,
+      items: [
+        { identity: 'First role', text: 'First role' },
+        { identity: 'Second role', text: 'Second role' },
+      ],
       truncated: false,
     });
   });

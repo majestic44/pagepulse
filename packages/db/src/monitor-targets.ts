@@ -61,6 +61,39 @@ function readNullableString(record: Record<string, unknown>, key: string) {
   return readString(record, key);
 }
 
+function asUnknownArray(value: unknown): ReadonlyArray<unknown> | undefined {
+  return Array.isArray(value) ? (value as unknown[]) : undefined;
+}
+
+function asStringArray(
+  value: ReadonlyArray<unknown> | undefined,
+): ReadonlyArray<string> | undefined {
+  return value?.every((entry) => typeof entry === 'string') ? value : undefined;
+}
+
+function readIgnoreSelectors(record: Record<string, unknown>): ReadonlyArray<string> {
+  const value = record.ignoreSelectors;
+  if (value === null) {
+    return [];
+  }
+  const array = asStringArray(asUnknownArray(value));
+  if (array) {
+    return array;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      const parsedArray = asStringArray(asUnknownArray(parsed));
+      if (parsedArray) {
+        return parsedArray;
+      }
+    } catch {
+      // Fall through to the invalid database-data error below.
+    }
+  }
+  throw new Error('Monitor target data is invalid: ignoreSelectors');
+}
+
 function readMonitor(row: RowDataPacket): Monitor {
   const record = asRecord(row);
   const state = readString(record, 'state');
@@ -85,7 +118,20 @@ function readMonitor(row: RowDataPacket): Monitor {
 function readTarget(row: RowDataPacket): MonitorTarget {
   const record = asRecord(row);
   const selector = readNullableString(record, 'selector');
+  const itemSelector = readNullableString(record, 'itemSelector');
+  const identitySelector = readNullableString(record, 'identitySelector');
+  const ignoreSelectors = readIgnoreSelectors(record);
+  if (itemSelector === null && identitySelector === null && ignoreSelectors.length === 0) {
+    return normalizeMonitorTargetConfiguration({
+      ...(selector === null ? {} : { selector }),
+      targetType: readString(record, 'targetType') as MonitorTarget['targetType'],
+    });
+  }
+  if (itemSelector === null || identitySelector === null) {
+    throw new Error('Monitor target data is invalid: repeated list configuration');
+  }
   return normalizeMonitorTargetConfiguration({
+    repeatedList: { identitySelector, ignoreSelectors, itemSelector },
     ...(selector === null ? {} : { selector }),
     targetType: readString(record, 'targetType') as MonitorTarget['targetType'],
   });
@@ -139,7 +185,8 @@ export async function getMonitorTarget(
   validateIdentifier(monitorId, 'monitorId');
   const monitor = await findOwnedMonitor(connection, ownerId, monitorId, false);
   const [rows] = await connection.query<RowDataPacket[]>(
-    `SELECT target_type AS targetType, selector
+    `SELECT target_type AS targetType, selector, item_selector AS itemSelector,
+            identity_selector AS identitySelector, ignore_selectors AS ignoreSelectors
      FROM monitor_targets
      WHERE monitor_id = ?
      LIMIT 1`,
@@ -147,7 +194,9 @@ export async function getMonitorTarget(
   );
   return {
     monitor,
-    target: rows[0] ? readTarget(rows[0]) : { selector: null, targetType: 'whole_page' },
+    target: rows[0]
+      ? readTarget(rows[0])
+      : { repeatedList: null, selector: null, targetType: 'whole_page' },
   } satisfies MonitorTargetWithMonitor;
 }
 
@@ -173,11 +222,23 @@ export async function upsertOwnedMonitorTarget(
     monitorId,
   ]);
   await connection.query(
-    `INSERT INTO monitor_targets (monitor_id, target_type, selector)
-     VALUES (?, ?, ?)
+    `INSERT INTO monitor_targets (
+       monitor_id, target_type, selector, item_selector, identity_selector, ignore_selectors
+     )
+     VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE target_type = VALUES(target_type), selector = VALUES(selector),
+                             item_selector = VALUES(item_selector),
+                             identity_selector = VALUES(identity_selector),
+                             ignore_selectors = VALUES(ignore_selectors),
                              updated_at = CURRENT_TIMESTAMP`,
-    [monitorId, target.targetType, target.selector],
+    [
+      monitorId,
+      target.targetType,
+      target.selector,
+      target.repeatedList?.itemSelector ?? null,
+      target.repeatedList?.identitySelector ?? null,
+      target.repeatedList ? JSON.stringify(target.repeatedList.ignoreSelectors) : null,
+    ],
   );
   return { monitor: { ...monitor, revision }, target };
 }

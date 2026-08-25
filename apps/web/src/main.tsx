@@ -28,7 +28,7 @@ const milestones = [
   },
   {
     detail:
-      'Members can create, revise, pause, resume and delete public monitors, choose schedules and preview whole-page or CSS-selector extraction.',
+      'Members can create, revise, pause, resume and delete public monitors, choose schedules, and configure whole-page, CSS-selector, or repeated-list extraction.',
     label: 'Phase 3',
     status: 'In progress',
     title: 'Monitor configuration',
@@ -118,7 +118,14 @@ type MonitorScheduleResponse = Readonly<{
 
 type MonitorTargetType = 'css_selector' | 'whole_page';
 
+type MonitorRepeatedListConfiguration = Readonly<{
+  identitySelector: string;
+  ignoreSelectors: ReadonlyArray<string>;
+  itemSelector: string;
+}>;
+
 type MonitorTargetSummary = Readonly<{
+  repeatedList: MonitorRepeatedListConfiguration | null;
   selector: string | null;
   targetType: MonitorTargetType;
 }>;
@@ -130,6 +137,19 @@ type MonitorTargetResponse = Readonly<{
 
 type MonitorTargetPreview = Readonly<{
   matchCount: number;
+  repeatedList: Readonly<{
+    itemCount: number;
+    items: ReadonlyArray<Readonly<{ identity: string; text: string }>>;
+    truncated: boolean;
+  }> | null;
+  repeatedListCandidates: ReadonlyArray<
+    Readonly<{
+      identitySelectorSuggestions: ReadonlyArray<string>;
+      itemCount: number;
+      itemSelector: string;
+      sampleTexts: ReadonlyArray<string>;
+    }>
+  >;
   text: string;
   truncated: boolean;
 }>;
@@ -808,6 +828,9 @@ function MonitorManagement() {
   const [targetMonitor, setTargetMonitor] = useState<MonitorSummary>();
   const [targetType, setTargetType] = useState<MonitorTargetType>('whole_page');
   const [targetSelector, setTargetSelector] = useState('');
+  const [repeatedListItemSelector, setRepeatedListItemSelector] = useState('');
+  const [repeatedListIdentitySelector, setRepeatedListIdentitySelector] = useState('');
+  const [repeatedListIgnoreSelectors, setRepeatedListIgnoreSelectors] = useState('');
   const [targetPreview, setTargetPreview] = useState<MonitorTargetPreview>();
   const [message, setMessage] = useState<string>();
   const [submitting, setSubmitting] = useState<string>();
@@ -867,14 +890,46 @@ function MonitorManagement() {
   }
 
   function targetPayload() {
-    return targetType === 'css_selector'
-      ? { selector: targetSelector, targetType }
-      : { targetType };
+    const ignoreSelectors = repeatedListIgnoreSelectors
+      .split(/\r?\n/u)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    const repeatedList =
+      repeatedListItemSelector.trim().length > 0 ||
+      repeatedListIdentitySelector.trim().length > 0 ||
+      ignoreSelectors.length > 0
+        ? {
+            identitySelector: repeatedListIdentitySelector,
+            ignoreSelectors,
+            itemSelector: repeatedListItemSelector,
+          }
+        : undefined;
+    const target =
+      targetType === 'css_selector' ? { selector: targetSelector, targetType } : { targetType };
+    return repeatedList ? { ...target, repeatedList } : target;
   }
 
   function loadTargetForm(value: MonitorTargetSummary) {
     setTargetType(value.targetType);
     setTargetSelector(value.selector ?? '');
+    setRepeatedListItemSelector(value.repeatedList?.itemSelector ?? '');
+    setRepeatedListIdentitySelector(value.repeatedList?.identitySelector ?? '');
+    setRepeatedListIgnoreSelectors(value.repeatedList?.ignoreSelectors.join('\n') ?? '');
+    setTargetPreview(undefined);
+  }
+
+  function useRepeatedListCandidate(
+    candidate: MonitorTargetPreview['repeatedListCandidates'][number],
+  ) {
+    setRepeatedListItemSelector(candidate.itemSelector);
+    setRepeatedListIdentitySelector(candidate.identitySelectorSuggestions[0] ?? '');
+    setRepeatedListIgnoreSelectors('');
+  }
+
+  function clearRepeatedList() {
+    setRepeatedListItemSelector('');
+    setRepeatedListIdentitySelector('');
+    setRepeatedListIgnoreSelectors('');
     setTargetPreview(undefined);
   }
 
@@ -1192,7 +1247,9 @@ function MonitorManagement() {
         return;
       }
       if (response.status === 400) {
-        setMessage('Choose whole-page extraction or a valid CSS selector.');
+        setMessage(
+          'Choose a valid target and, when configured, complete each repeated-list selector.',
+        );
         return;
       }
       if (!response.ok) {
@@ -1203,9 +1260,11 @@ function MonitorManagement() {
       setTargetMonitor(result.monitor);
       loadTargetForm(result.target);
       setMessage(
-        result.target.targetType === 'whole_page'
-          ? 'Whole-page extraction saved.'
-          : 'CSS selector extraction saved.',
+        result.target.repeatedList
+          ? 'Repeated-list extraction saved.'
+          : result.target.targetType === 'whole_page'
+            ? 'Whole-page extraction saved.'
+            : 'CSS selector extraction saved.',
       );
     } catch {
       setMessage('Extraction configuration is temporarily unavailable. Please try again.');
@@ -1232,7 +1291,9 @@ function MonitorManagement() {
         },
       );
       if (response.status === 400) {
-        setMessage('Choose whole-page extraction or a valid CSS selector before previewing.');
+        setMessage(
+          'Choose a valid target and, when configured, complete each repeated-list selector before previewing.',
+        );
         return;
       }
       if (response.status === 422) {
@@ -1517,16 +1578,124 @@ function MonitorManagement() {
               />
             </label>
           ) : null}
+          <section className="extraction-settings">
+            <h3>Repeated list (optional)</h3>
+            <p className="account-intro">
+              Preview the target to detect likely repeating items, then choose the list and the
+              region that identifies each item. Ignore selectors are applied only within an item.
+            </p>
+            <label>
+              List item selector
+              <input
+                autoComplete="off"
+                maxLength={512}
+                onChange={(event) => setRepeatedListItemSelector(event.target.value)}
+                placeholder="ul.openings > li.job"
+                type="text"
+                value={repeatedListItemSelector}
+              />
+            </label>
+            <label>
+              Identity selector within each item
+              <input
+                autoComplete="off"
+                maxLength={512}
+                onChange={(event) => setRepeatedListIdentitySelector(event.target.value)}
+                placeholder="a[href]"
+                type="text"
+                value={repeatedListIdentitySelector}
+              />
+            </label>
+            <label>
+              Ignore regions within each item
+              <textarea
+                maxLength={5_120}
+                onChange={(event) => setRepeatedListIgnoreSelectors(event.target.value)}
+                placeholder={'span.posted-at\nspan.location'}
+                rows={3}
+                value={repeatedListIgnoreSelectors}
+              />
+            </label>
+            {repeatedListItemSelector ||
+            repeatedListIdentitySelector ||
+            repeatedListIgnoreSelectors ? (
+              <button disabled={submitting !== undefined} onClick={clearRepeatedList} type="button">
+                Clear repeated-list settings
+              </button>
+            ) : null}
+          </section>
           {targetPreview ? (
-            <section className="extraction-preview" aria-live="polite">
-              <p className="eyebrow">PREVIEW</p>
-              <p>
-                {targetPreview.matchCount} matching{' '}
-                {targetPreview.matchCount === 1 ? 'element' : 'elements'}
-                {targetPreview.truncated ? ' · text truncated' : ''}
-              </p>
-              <pre>{targetPreview.text || 'The selected region contains no readable text.'}</pre>
-            </section>
+            <>
+              <section className="extraction-preview" aria-live="polite">
+                <p className="eyebrow">PREVIEW</p>
+                <p>
+                  {targetPreview.matchCount} matching{' '}
+                  {targetPreview.matchCount === 1 ? 'element' : 'elements'}
+                  {targetPreview.truncated ? ' · text truncated' : ''}
+                </p>
+                <pre>{targetPreview.text || 'The selected region contains no readable text.'}</pre>
+              </section>
+              {targetPreview.repeatedListCandidates.length > 0 ? (
+                <section className="extraction-preview repeated-list-preview" aria-live="polite">
+                  <p className="eyebrow">REPEATED-LIST CANDIDATES</p>
+                  <p>
+                    These candidates are derived from the selected target. Choose one, review its
+                    suggested identity region, and preview again before saving.
+                  </p>
+                  <ol className="repeated-list-candidates">
+                    {targetPreview.repeatedListCandidates.map((candidate) => (
+                      <li key={candidate.itemSelector}>
+                        <div>
+                          <code>{candidate.itemSelector}</code>
+                          <p>
+                            {candidate.itemCount} matching{' '}
+                            {candidate.itemCount === 1 ? 'item' : 'items'}
+                          </p>
+                          {candidate.identitySelectorSuggestions.length > 0 ? (
+                            <p>
+                              Identity suggestions:{' '}
+                              {candidate.identitySelectorSuggestions.join(', ')}
+                            </p>
+                          ) : null}
+                          {candidate.sampleTexts.length > 0 ? (
+                            <ul>
+                              {candidate.sampleTexts.map((sample) => (
+                                <li key={sample}>{sample}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                        <button
+                          disabled={submitting !== undefined}
+                          onClick={() => useRepeatedListCandidate(candidate)}
+                          type="button"
+                        >
+                          Use candidate
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+              {targetPreview.repeatedList ? (
+                <section className="extraction-preview repeated-list-preview" aria-live="polite">
+                  <p className="eyebrow">REPEATED-LIST PREVIEW</p>
+                  <p>
+                    {targetPreview.repeatedList.itemCount} matching list{' '}
+                    {targetPreview.repeatedList.itemCount === 1 ? 'item' : 'items'}
+                    {targetPreview.repeatedList.truncated ? ' · samples truncated' : ''}
+                  </p>
+                  <ol className="repeated-list-candidates">
+                    {targetPreview.repeatedList.items.map((item, index) => (
+                      <li key={`${item.identity}-${index}`}>
+                        <strong>{item.identity}</strong>
+                        <span>{item.text || 'No readable text remains after ignores.'}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+            </>
           ) : null}
           <div className="member-actions">
             <button
@@ -2266,8 +2435,8 @@ function App() {
           Local owner onboarding now sends one-time verification links to development-only Mailpit.
           Production verification and password-reset provider delivery remain deferred.
           Authenticator-app MFA, session, member lifecycle and recoverable deletion controls are now
-          available. Monitor configuration, scheduling, and safe extraction previews are ready;
-          repeated-list detection follows next.
+          available. Monitor configuration, scheduling, safe extraction previews, and repeated-list
+          selection are ready; rule configuration follows next.
         </p>
       </section>
 
