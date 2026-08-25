@@ -52,17 +52,17 @@ describe('check outcome persistence', () => {
         },
         startedAt: new Date('2026-08-25T11:59:00.000Z'),
       }),
-    ).resolves.toEqual({ recorded: true });
+    ).resolves.toEqual({ recorded: true, reviewCreated: false });
 
     expect(fixture.connection.beginTransaction).toHaveBeenCalledOnce();
     expect(fixture.connection.commit).toHaveBeenCalledOnce();
     expect(query).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.stringContaining("'succeeded'"),
       expect.arrayContaining(['check-1', 'monitor-1', 'correlation-1']),
     );
     expect(query).toHaveBeenNthCalledWith(
-      3,
+      4,
       expect.stringContaining("'yes'"),
       expect.arrayContaining(['snapshot-1', 'check-1', 'monitor-1']),
     );

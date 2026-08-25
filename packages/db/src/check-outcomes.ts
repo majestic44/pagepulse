@@ -169,12 +169,72 @@ async function checkAlreadyRecorded(
   return rows.length > 0;
 }
 
+type PreviousSnapshot = Readonly<{
+  contentHash: string;
+  id: string;
+}>;
+
+async function previousSuccessfulSnapshot(
+  connection: Pick<CheckOutcomeConnection, 'query'>,
+  monitorId: string,
+  monitorRevision: number,
+): Promise<PreviousSnapshot | undefined> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT snapshots.id, checks.content_hash AS contentHash
+     FROM snapshots
+     INNER JOIN checks ON checks.id = snapshots.check_id
+     WHERE snapshots.monitor_id = ?
+       AND checks.monitor_revision = ?
+       AND checks.result = 'succeeded'
+     ORDER BY checks.completed_at DESC, snapshots.id DESC
+     LIMIT 1 FOR UPDATE`,
+    [monitorId, monitorRevision],
+  );
+  const row = rows[0];
+  if (!row || typeof row.id !== 'string' || typeof row.contentHash !== 'string') {
+    return undefined;
+  }
+  validateIdentifier(row.id, 'previous snapshot id', 36);
+  validateSha256(row.contentHash, 'previous snapshot contentHash');
+  return { contentHash: row.contentHash, id: row.id };
+}
+
+async function establishRuleBaseline(
+  connection: Pick<CheckOutcomeConnection, 'query'>,
+  monitorId: string,
+  monitorRevision: number,
+) {
+  await connection.query(
+    `INSERT INTO monitor_rules (
+       monitor_id, monitor_revision, configuration, baseline_state, baseline_revision
+     ) VALUES (?, ?, ?, 'established', ?)
+     ON DUPLICATE KEY UPDATE
+       baseline_state = IF(
+         monitor_rules.monitor_revision = VALUES(monitor_revision)
+         AND monitor_rules.baseline_state = 'pending',
+         'established',
+         monitor_rules.baseline_state
+       )`,
+    [
+      monitorId,
+      monitorRevision,
+      JSON.stringify({ newItem: false, textChange: true }),
+      monitorRevision,
+    ],
+  );
+}
+
 export async function recordSuccessfulCheck(pool: CheckOutcomePool, input: SuccessfulCheckInput) {
   validateSuccessfulInput(input);
   return withTransaction(pool, async (connection) => {
     if (await checkAlreadyRecorded(connection, input.checkId)) {
       return { recorded: false as const };
     }
+    const previous = await previousSuccessfulSnapshot(
+      connection,
+      input.monitorId,
+      input.monitorRevision,
+    );
     await connection.query(
       `INSERT INTO checks (
         id, monitor_id, monitor_revision, correlation_id, result, failure_code, content_hash,
@@ -207,7 +267,19 @@ export async function recordSuccessfulCheck(pool: CheckOutcomePool, input: Succe
         input.completedAt,
       ],
     );
-    return { recorded: true as const };
+    await establishRuleBaseline(connection, input.monitorId, input.monitorRevision);
+    if (previous && previous.contentHash !== input.contentHash) {
+      await connection.query(
+        `INSERT INTO changes (
+           id, monitor_id, previous_snapshot_id, current_snapshot_id, summary, state, reviewed_at, created_at
+         ) VALUES (?, ?, ?, ?, 'Extracted content changed', 'pending', NULL, ?)`,
+        [input.checkId, input.monitorId, previous.id, input.snapshot.id, input.completedAt],
+      );
+    }
+    return {
+      recorded: true as const,
+      reviewCreated: previous !== undefined && previous.contentHash !== input.contentHash,
+    };
   });
 }
 

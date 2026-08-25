@@ -12,11 +12,11 @@ import {
 } from './migrate.js';
 
 describe('current schema compatibility', () => {
-  it('records the monitor-rule configuration migration', () => {
+  it('records the change-review lifecycle migration', () => {
     expect(currentSchemaCompatibility).toEqual({
-      migrationId: 'monitor-rule-configuration',
+      migrationId: 'change-review-lifecycle',
       minimumAppVersion: '0.0.0',
-      schemaVersion: 12,
+      schemaVersion: 13,
     });
   });
 });

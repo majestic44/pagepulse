@@ -299,6 +299,30 @@ export const snapshots = mysqlTable(
   ],
 );
 
+export const changes = mysqlTable(
+  'changes',
+  {
+    id: varchar('id', { length: 36 }).primaryKey(),
+    monitorId: varchar('monitor_id', { length: 36 })
+      .notNull()
+      .references(() => monitors.id, { onDelete: 'cascade' }),
+    previousSnapshotId: varchar('previous_snapshot_id', { length: 36 })
+      .notNull()
+      .references(() => snapshots.id, { onDelete: 'cascade' }),
+    currentSnapshotId: varchar('current_snapshot_id', { length: 36 })
+      .notNull()
+      .unique()
+      .references(() => snapshots.id, { onDelete: 'cascade' }),
+    summary: varchar('summary', { length: 160 }).notNull(),
+    state: mysqlEnum('state', ['pending', 'expected', 'ignored']).notNull().default('pending'),
+    reviewedAt: timestamp('reviewed_at'),
+    createdAt: timestamp('created_at').notNull(),
+  },
+  (table) => [
+    index('changes_monitor_state_created_idx').on(table.monitorId, table.state, table.createdAt),
+  ],
+);
+
 export const outboxEvents = mysqlTable(
   'outbox_events',
   {

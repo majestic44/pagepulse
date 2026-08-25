@@ -489,6 +489,78 @@ h3 {
   gap: 0.7rem;
   justify-content: flex-end;
 }
+.change-review-list {
+  display: grid;
+  gap: 1.5rem;
+  list-style: none;
+  margin: 2rem 0 0;
+  padding: 0;
+}
+.change-review-list > li {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 1.25rem;
+}
+.change-review-heading {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+.change-review-heading h2,
+.change-review-heading p,
+.change-content-grid h3 {
+  margin: 0;
+}
+.change-review-heading p,
+.change-content-grid p {
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+.change-state {
+  border-radius: 99px;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.55rem;
+  text-transform: uppercase;
+}
+.change-state-pending {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.change-state-expected {
+  background: color-mix(in srgb, #249b5a 18%, transparent);
+  color: #16743f;
+}
+.change-state-ignored {
+  background: var(--line);
+  color: var(--muted);
+}
+.change-content-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 1.25rem 0;
+}
+.change-content-grid section {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  min-width: 0;
+  padding: 0.9rem;
+}
+.change-content-grid pre {
+  font:
+    0.8rem/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  margin: 0.8rem 0 0;
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .session-list h2 {
   font-size: 1.2rem;
 }
@@ -575,6 +647,9 @@ h3 {
     margin-top: 0.7rem;
   }
   .recovery-code-list {
+    grid-template-columns: 1fr;
+  }
+  .change-content-grid {
     grid-template-columns: 1fr;
   }
 }

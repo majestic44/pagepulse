@@ -19,5 +19,6 @@ Drizzle migrations in this directory are forward-only in production. Apply them 
 | `0010_silent_apocalypse`         | Additive only. Disable repeated-list configuration and preview behavior, then restore a verified pre-migration backup if these target columns must be removed; do not drop live columns without an expand/migrate/contract release. |
 | `0011_faulty_lifeguard`          | Additive only. Disable rule configuration and restore a verified pre-migration backup if the rule table must be removed; do not drop the table from a live production database.                                                     |
 | `0012_atomic-snapshots`          | Additive only. Disable snapshot publication and retention cleanup, then restore a verified pre-migration backup if check or snapshot records must be removed; do not drop live monitoring history in place.                         |
+| `0013_tranquil_rick_jones`       | Additive only. Disable change-review APIs and restore a verified pre-migration backup if review records must be removed; do not drop live change history in place.                                                                  |
 
 For later destructive schema changes, use expand/migrate/contract across releases and add a restore or rollback note to this table.
