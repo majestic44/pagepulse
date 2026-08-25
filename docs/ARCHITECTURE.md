@@ -47,10 +47,12 @@ schedule is configured. A monitor or schedule change increments the monitor revi
 revision in the same MariaDB transaction; paused monitors are excluded from reconciliation. This prevents stale jobs
 without relying on Redis as state authority.
 
-Monitor targets are also revisioned MariaDB configuration. A saved whole-page or CSS-selector target increments the
-monitor revision and synchronizes the existing schedule revision atomically. The member preview endpoint is an
-API-bound, rate-limited diagnostic path that returns bounded text only; it is not a queue job and never carries fetched
-content, credentials, or an arbitrary target URL into Redis.
+Monitor targets are also revisioned MariaDB configuration. A saved whole-page or CSS-selector target can include an
+optional repeated-list item selector, member-selected identity selector, and bounded per-item ignore selectors; any
+target change increments the monitor revision and synchronizes the existing schedule revision atomically. The member
+preview endpoint is an API-bound, rate-limited diagnostic path that returns bounded text, candidate metadata, and
+bounded samples only; it is not a queue job and never carries fetched content, credentials, or an arbitrary target URL
+into Redis.
 
 5. Worker writes a bounded raw snapshot to the private volume and enqueues a reference for `change-detection`.
 6. Change worker normalizes, extracts identities, evaluates rules, and commits check/event/snapshot metadata in MariaDB.

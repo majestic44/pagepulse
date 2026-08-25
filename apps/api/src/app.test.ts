@@ -66,7 +66,7 @@ function createAuthenticationDependencies(
       getSchedule: vi.fn().mockResolvedValue({ monitor, schedule: null }),
       getTarget: vi.fn().mockResolvedValue({
         monitor,
-        target: { selector: null, targetType: 'whole_page' as const },
+        target: { repeatedList: null, selector: null, targetType: 'whole_page' as const },
       }),
       list: vi.fn().mockResolvedValue([monitor]),
       pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
@@ -87,7 +87,7 @@ function createAuthenticationDependencies(
       }),
       updateTarget: vi.fn().mockResolvedValue({
         monitor: { ...monitor, revision: 2 },
-        target: { selector: null, targetType: 'whole_page' as const },
+        target: { repeatedList: null, selector: null, targetType: 'whole_page' as const },
       }),
       ...monitors,
     },
@@ -1049,7 +1049,24 @@ describe('authentication contract', () => {
   });
 
   it('lets a member configure a CSS target and preview the selected text', async () => {
-    const cssTarget = { selector: 'main > article', targetType: 'css_selector' as const };
+    const cssTarget = {
+      repeatedList: {
+        identitySelector: 'a[href]',
+        ignoreSelectors: ['.meta'],
+        itemSelector: 'ul.openings > li.job',
+      },
+      selector: 'main > article',
+      targetType: 'css_selector' as const,
+    };
+    const cssTargetRequest = {
+      repeatedList: {
+        identitySelector: 'a[href]',
+        ignoreSelectors: ['.meta'],
+        itemSelector: 'ul.openings > li.job',
+      },
+      selector: 'main > article',
+      targetType: 'css_selector' as const,
+    };
     const authentication = createAuthenticationDependencies(
       {},
       undefined,
@@ -1070,6 +1087,19 @@ describe('authentication contract', () => {
     const monitorPreview = {
       preview: vi.fn().mockResolvedValue({
         matchCount: 2,
+        repeatedList: {
+          itemCount: 2,
+          items: [{ identity: 'First role', text: 'First role' }],
+          truncated: true,
+        },
+        repeatedListCandidates: [
+          {
+            identitySelectorSuggestions: ['a[href]'],
+            itemCount: 2,
+            itemSelector: 'ul.openings > li.job',
+            sampleTexts: ['First role Remote'],
+          },
+        ],
         text: 'First role Second role',
         truncated: false,
       }),
@@ -1087,13 +1117,13 @@ describe('authentication contract', () => {
       method: 'PUT',
       url: '/api/v1/monitors/monitor-id/target',
       headers: { cookie, 'if-match': '"1"' },
-      payload: cssTarget,
+      payload: cssTargetRequest,
     });
     const previewed = await testApp.inject({
       method: 'POST',
       url: '/api/v1/monitors/monitor-id/target/preview',
       headers: { cookie },
-      payload: cssTarget,
+      payload: cssTargetRequest,
     });
 
     expect(fetched.statusCode).toBe(200);
@@ -1110,15 +1140,32 @@ describe('authentication contract', () => {
     });
     expect(previewed.statusCode).toBe(200);
     expect(previewed.json()).toEqual({
-      preview: { matchCount: 2, text: 'First role Second role', truncated: false },
+      preview: {
+        matchCount: 2,
+        repeatedList: {
+          itemCount: 2,
+          items: [{ identity: 'First role', text: 'First role' }],
+          truncated: true,
+        },
+        repeatedListCandidates: [
+          {
+            identitySelectorSuggestions: ['a[href]'],
+            itemCount: 2,
+            itemSelector: 'ul.openings > li.job',
+            sampleTexts: ['First role Remote'],
+          },
+        ],
+        text: 'First role Second role',
+        truncated: false,
+      },
     });
     expect(authentication.monitors.updateTarget).toHaveBeenCalledWith(
       activeSession.userId,
       'monitor-id',
       1,
-      cssTarget,
+      cssTargetRequest,
     );
-    expect(monitorPreview.preview).toHaveBeenCalledWith(monitor, cssTarget);
+    expect(monitorPreview.preview).toHaveBeenCalledWith(monitor, cssTargetRequest);
   });
 
   it('does not expose preview failures and enforces the preview rate limit', async () => {

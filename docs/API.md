@@ -147,12 +147,15 @@ to that session's user ID. A caller cannot read or mutate another account's moni
   record into BullMQ.
 - `GET /api/v1/monitors/{monitorId}/target` returns the owned monitor and extraction target, defaulting existing
   monitors to `whole_page`. `PUT /api/v1/monitors/{monitorId}/target` requires `If-Match`, accepts either
-  `whole_page` or a bounded valid CSS selector, and atomically increments the monitor revision with its MariaDB
-  target record. It also synchronizes any schedule revision before reconciliation.
+  `whole_page` or a bounded valid CSS selector, plus an optional repeated-list configuration. A repeated list has
+  bounded item and identity selectors plus up to ten member ignore selectors evaluated within each item. Saving it
+  atomically increments the monitor revision with its MariaDB target record and synchronizes any schedule revision
+  before reconciliation.
 - `POST /api/v1/monitors/{monitorId}/target/preview` accepts an unsaved target configuration and returns bounded
-  text-only extraction from that owned monitor's existing URL. It never persists the preview request, accepts no
-  alternate URL or credentials, is rate-limited per requester, and returns only generic errors for rejected
-  destinations or failed/unsupported pages.
+  text-only extraction and at most six repeated-list candidates from that owned monitor's existing URL. When an
+  optional repeated-list configuration is supplied, it also returns at most five bounded item samples after applying
+  the member ignore selectors. It never persists the preview request, accepts no alternate URL or credentials, is
+  rate-limited per requester, and returns only generic errors for rejected destinations or failed/unsupported pages.
 
 Names are trimmed and bounded, and URLs must be absolute HTTP(S) values without embedded credentials or fragments.
 Monitor CRUD and schedule routes store configuration only. The extraction-preview route is the narrowly scoped

@@ -200,13 +200,27 @@ h3 {
   font-weight: 700;
 }
 .sign-in-form input,
-.sign-in-form select {
+.sign-in-form select,
+.sign-in-form textarea {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   color: var(--text);
   font: inherit;
   padding: 0.75rem 0.85rem;
+}
+.sign-in-form textarea {
+  resize: vertical;
+}
+.extraction-settings {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1.5rem;
+}
+.extraction-settings h3 {
+  margin: 0;
 }
 .extraction-preview {
   background: var(--panel);
@@ -231,6 +245,32 @@ h3 {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.repeated-list-preview {
+  margin-top: 1rem;
+}
+.repeated-list-candidates {
+  display: grid;
+  gap: 0.9rem;
+  margin: 1rem 0 0;
+  padding-left: 1.25rem;
+}
+.repeated-list-candidates > li {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+.repeated-list-candidates code,
+.repeated-list-candidates span {
+  color: var(--text);
+  display: block;
+  overflow-wrap: anywhere;
+}
+.repeated-list-candidates ul {
+  color: var(--muted);
+  margin: 0.65rem 0 0;
+  padding-left: 1.25rem;
 }
 .sign-in-form button,
 .session-actions button {

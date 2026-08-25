@@ -24,6 +24,12 @@ three redirects, disables response compression, accepts HTML only, and returns a
 characters of text. Preview requests are rate-limited and error responses intentionally omit destination and fetch
 details.
 
+The same bounded parse can identify up to six conservative repeated-list candidates from sibling structures inside the
+chosen target. Candidates contain CSS selectors, counts, and short text samples only. A member may save an item
+selector, a required identity selector evaluated within each item, and up to ten ignore selectors evaluated only within
+that item. When configured, preview returns at most five bounded item samples after ignores are applied; it does not
+persist HTML or add any fetched content to a queue.
+
 ## Browser isolation
 
 - Fresh context for every check; no shared browser storage directory.

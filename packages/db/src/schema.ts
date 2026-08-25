@@ -2,6 +2,7 @@ import {
   bigint,
   index,
   int,
+  json,
   mysqlEnum,
   mysqlTable,
   timestamp,
@@ -232,6 +233,9 @@ export const monitorTargets = mysqlTable('monitor_targets', {
     .notNull()
     .default('whole_page'),
   selector: varchar('selector', { length: 512 }),
+  itemSelector: varchar('item_selector', { length: 512 }),
+  identitySelector: varchar('identity_selector', { length: 512 }),
+  ignoreSelectors: json('ignore_selectors').$type<ReadonlyArray<string>>(),
   updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
 });
 

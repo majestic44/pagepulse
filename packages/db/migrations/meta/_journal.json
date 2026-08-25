@@ -71,6 +71,13 @@
       "when": 1787643893555,
       "tag": "0009_thick_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787646018611,
+      "tag": "0010_silent_apocalypse",
+      "breakpoints": true
     }
   ]
 }

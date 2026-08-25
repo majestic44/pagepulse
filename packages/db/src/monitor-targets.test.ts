@@ -28,11 +28,11 @@ describe('member monitor targets', () => {
 
     await expect(getMonitorTarget(connection(query), 'member-id', 'monitor-id')).resolves.toEqual({
       monitor: monitorRow,
-      target: { selector: null, targetType: 'whole_page' },
+      target: { repeatedList: null, selector: null, targetType: 'whole_page' },
     });
   });
 
-  it('stores a selector target with a new monitor revision and scheduler revision', async () => {
+  it('stores a selector target and repeated-list settings with a new monitor revision', async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce([[monitorRow], []])
@@ -40,12 +40,25 @@ describe('member monitor targets', () => {
 
     await expect(
       upsertOwnedMonitorTarget(connection(query), 'member-id', 'monitor-id', 1, {
+        repeatedList: {
+          identitySelector: 'a[href]',
+          ignoreSelectors: ['.meta'],
+          itemSelector: 'ul.openings > li.job',
+        },
         selector: 'main > article',
         targetType: 'css_selector',
       }),
     ).resolves.toEqual({
       monitor: { ...monitorRow, revision: 2 },
-      target: { selector: 'main > article', targetType: 'css_selector' },
+      target: {
+        repeatedList: {
+          identitySelector: 'a[href]',
+          ignoreSelectors: ['.meta'],
+          itemSelector: 'ul.openings > li.job',
+        },
+        selector: 'main > article',
+        targetType: 'css_selector',
+      },
     });
 
     expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('FOR UPDATE'), [
@@ -66,7 +79,63 @@ describe('member monitor targets', () => {
       'monitor-id',
       'css_selector',
       'main > article',
+      'ul.openings > li.job',
+      'a[href]',
+      '[".meta"]',
     ]);
+  });
+
+  it('reads persisted repeated-list selectors from the target record', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([[monitorRow], []])
+      .mockResolvedValueOnce([
+        [
+          {
+            identitySelector: 'a[href]',
+            ignoreSelectors: '[".meta"]',
+            itemSelector: 'ul.openings > li.job',
+            selector: 'main',
+            targetType: 'css_selector',
+          },
+        ],
+        [],
+      ]);
+
+    await expect(getMonitorTarget(connection(query), 'member-id', 'monitor-id')).resolves.toEqual({
+      monitor: monitorRow,
+      target: {
+        repeatedList: {
+          identitySelector: 'a[href]',
+          ignoreSelectors: ['.meta'],
+          itemSelector: 'ul.openings > li.job',
+        },
+        selector: 'main',
+        targetType: 'css_selector',
+      },
+    });
+  });
+
+  it('rejects malformed repeated-list data from the database', async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([[monitorRow], []])
+      .mockResolvedValueOnce([
+        [
+          {
+            identitySelector: 'a[href]',
+            ignoreSelectors: '{"not":"an array"}',
+            itemSelector: 'ul.openings > li.job',
+            selector: 'main',
+            targetType: 'css_selector',
+          },
+        ],
+        [],
+      ]);
+
+    await expect(getMonitorTarget(connection(query), 'member-id', 'monitor-id')).rejects.toThrow(
+      'Monitor target data is invalid: ignoreSelectors',
+    );
   });
 
   it('validates target input before locking and enforces revision preconditions', async () => {
