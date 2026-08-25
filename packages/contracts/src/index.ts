@@ -378,6 +378,39 @@ export const MonitorScheduleResponse = Type.Object({
   schedule: Type.Union([MonitorScheduleSummary, Type.Null()]),
 });
 
+export const MonitorTargetType = Type.Union([
+  Type.Literal('whole_page'),
+  Type.Literal('css_selector'),
+]);
+
+export const MonitorTargetConfiguration = Type.Object(
+  {
+    selector: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    targetType: MonitorTargetType,
+  },
+  queuePayloadOptions,
+);
+
+export const MonitorTargetSummary = Type.Object({
+  selector: Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
+  targetType: MonitorTargetType,
+});
+
+export const MonitorTargetResponse = Type.Object({
+  monitor: MonitorSummary,
+  target: MonitorTargetSummary,
+});
+
+export const MonitorTargetPreview = Type.Object({
+  matchCount: Type.Integer({ minimum: 1 }),
+  text: Type.String({ maxLength: 20_000 }),
+  truncated: Type.Boolean(),
+});
+
+export const MonitorTargetPreviewResponse = Type.Object({
+  preview: MonitorTargetPreview,
+});
+
 export const MonitorsResponse = Type.Object({
   monitors: Type.Array(MonitorSummary),
 });
@@ -392,6 +425,21 @@ export const InvalidMonitorRequestResponse = Type.Object({
 
 export const InvalidMonitorScheduleRequestResponse = Type.Object({
   error: Type.Literal('Invalid monitor schedule'),
+});
+
+export const InvalidMonitorTargetRequestResponse = Type.Object({
+  error: Type.Literal('Invalid monitor target'),
+});
+
+export const MonitorPreviewFailureResponse = Type.Object({
+  error: Type.Union([
+    Type.Literal('Preview target is not allowed'),
+    Type.Literal('Preview unavailable'),
+  ]),
+});
+
+export const TooManyMonitorPreviewRequestsResponse = Type.Object({
+  error: Type.Literal('Too many preview attempts'),
 });
 
 export const MonitorLimitResponse = Type.Object({

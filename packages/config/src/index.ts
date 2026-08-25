@@ -67,6 +67,13 @@ const environmentSchema = z
       .min(1_000)
       .max(86_400_000)
       .default(3_600_000),
+    MONITOR_PREVIEW_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100).default(10),
+    MONITOR_PREVIEW_RATE_LIMIT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(60_000),
     SESSION_IDLE_TTL_MINUTES: z.coerce.number().int().min(5).max(10_080).default(480),
     SESSION_ABSOLUTE_TTL_MINUTES: z.coerce.number().int().min(60).max(43_200).default(43_200),
     LOG_LEVEL: z.enum(logLevels).default('info'),

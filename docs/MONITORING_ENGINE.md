@@ -14,6 +14,16 @@ Use the HTTP worker for HTML, JSON and RSS unless the monitor requires rendered 
 - Apply exponential backoff with jitter for temporary network and 5xx failures.
 - Never bypass TLS failures, CAPTCHA, bot challenges, paywalls or access controls.
 
+## Extraction preview
+
+An authenticated member can preview whole-page or CSS-selector extraction for an existing public monitor. The preview
+does not accept an arbitrary URL, credentials, or browser session and does not persist fetched HTML. It performs a
+fresh DNS check before every initial/redirect request and again at connection time, rejects any hostname with a
+loopback, private, link-local, multicast, metadata, documentation, or otherwise reserved address, follows at most
+three redirects, disables response compression, accepts HTML only, and returns at most 512 KiB of source and 20,000
+characters of text. Preview requests are rate-limited and error responses intentionally omit destination and fetch
+details.
+
 ## Browser isolation
 
 - Fresh context for every check; no shared browser storage directory.

@@ -260,6 +260,7 @@ export async function createAuthenticationService({
 export type AuthenticationRateLimitPolicies = Readonly<{
   deletion: Readonly<{ limit: number; windowMs: number }>;
   login: Readonly<{ limit: number; windowMs: number }>;
+  preview: Readonly<{ limit: number; windowMs: number }>;
   redemption: Readonly<{ limit: number; windowMs: number }>;
   reset: Readonly<{ limit: number; windowMs: number }>;
   totp: Readonly<{ limit: number; windowMs: number }>;

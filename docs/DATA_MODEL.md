@@ -26,7 +26,9 @@
 - `monitor_schedules`: MariaDB-authoritative, one-per-monitor schedule configuration keyed by the current monitor
   revision. It stores hourly/daily/custom type, IANA time zone, the applicable local time or custom interval, and a
   correlation ID. Redis holds only reconciled BullMQ scheduler state.
-- `monitor_targets`: whole page, selector, repeated-list configuration or visual locator.
+- `monitor_targets`: MariaDB-authoritative one-per-monitor whole-page or CSS-selector extraction configuration,
+  updated atomically with the monitor revision. Existing monitors default to whole-page extraction until configured.
+  Repeated-list configuration and visual locators remain later additions.
 - `monitor_rules`: rule type and versioned configuration.
 - `monitor_ignore_rules`: selectors, normalized patterns and built-in noise flags.
 - `auth_flows`: encrypted field mappings/session references and reauthorization state.

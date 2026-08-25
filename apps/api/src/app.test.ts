@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PasswordValidationError, type RateLimitStore } from '@pagepulse/auth';
 import { loadEnvironment } from '@pagepulse/config';
+import { MonitorPreviewError, MonitorTargetValidationError } from '@pagepulse/monitor-engine';
 import {
   AccountDeletionTokenError,
   MemberLifecycleStateError,
@@ -63,6 +64,10 @@ function createAuthenticationDependencies(
       deleteSchedule: vi.fn().mockResolvedValue({ ...monitor, revision: 2 }),
       get: vi.fn().mockResolvedValue(monitor),
       getSchedule: vi.fn().mockResolvedValue({ monitor, schedule: null }),
+      getTarget: vi.fn().mockResolvedValue({
+        monitor,
+        target: { selector: null, targetType: 'whole_page' as const },
+      }),
       list: vi.fn().mockResolvedValue([monitor]),
       pause: vi.fn().mockResolvedValue({ ...monitor, revision: 2, state: 'paused' }),
       resume: vi.fn().mockResolvedValue(monitor),
@@ -80,6 +85,10 @@ function createAuthenticationDependencies(
           timeZone: 'UTC',
         },
       }),
+      updateTarget: vi.fn().mockResolvedValue({
+        monitor: { ...monitor, revision: 2 },
+        target: { selector: null, targetType: 'whole_page' as const },
+      }),
       ...monitors,
     },
     emailDelivery: {
@@ -90,6 +99,7 @@ function createAuthenticationDependencies(
     rateLimitPolicies: {
       deletion: { limit: 3, windowMs: 60_000 },
       login: { limit: 5, windowMs: 60_000 },
+      preview: { limit: 10, windowMs: 60_000 },
       redemption: { limit: 5, windowMs: 60_000 },
       reset: { limit: 3, windowMs: 60_000 },
       totp: { limit: 5, windowMs: 60_000 },
@@ -187,6 +197,17 @@ const monitor: Monitor = {
   state: 'active',
   url: 'https://example.test/jobs',
 };
+
+function serializeMonitorForTest(value: Monitor) {
+  return {
+    createdAt: value.createdAt.toISOString(),
+    id: value.id,
+    name: value.name,
+    revision: value.revision,
+    state: value.state,
+    url: value.url,
+  };
+}
 
 const localAuditIpHash = '12ca17b49af2289436f303e0166030a21e525d266e209267433801a8fd4071a0';
 
@@ -1025,6 +1046,164 @@ describe('authentication contract', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'Invalid monitor schedule' });
     expect(authentication.monitors.updateSchedule).not.toHaveBeenCalled();
+  });
+
+  it('lets a member configure a CSS target and preview the selected text', async () => {
+    const cssTarget = { selector: 'main > article', targetType: 'css_selector' as const };
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        getTarget: vi.fn().mockResolvedValue({ monitor, target: cssTarget }),
+        updateTarget: vi.fn().mockResolvedValue({
+          monitor: { ...monitor, revision: 2 },
+          target: cssTarget,
+        }),
+      },
+    );
+    const monitorPreview = {
+      preview: vi.fn().mockResolvedValue({
+        matchCount: 2,
+        text: 'First role Second role',
+        truncated: false,
+      }),
+    };
+    const testApp = await buildApp({ authentication, monitorPreview });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const fetched = await testApp.inject({
+      method: 'GET',
+      url: '/api/v1/monitors/monitor-id/target',
+      headers: { cookie },
+    });
+    const configured = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id/target',
+      headers: { cookie, 'if-match': '"1"' },
+      payload: cssTarget,
+    });
+    const previewed = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors/monitor-id/target/preview',
+      headers: { cookie },
+      payload: cssTarget,
+    });
+
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.headers.etag).toBe('"1"');
+    expect(fetched.json()).toEqual({
+      monitor: serializeMonitorForTest(monitor),
+      target: cssTarget,
+    });
+    expect(configured.statusCode).toBe(200);
+    expect(configured.headers.etag).toBe('"2"');
+    expect(configured.json()).toEqual({
+      monitor: serializeMonitorForTest({ ...monitor, revision: 2 }),
+      target: cssTarget,
+    });
+    expect(previewed.statusCode).toBe(200);
+    expect(previewed.json()).toEqual({
+      preview: { matchCount: 2, text: 'First role Second role', truncated: false },
+    });
+    expect(authentication.monitors.updateTarget).toHaveBeenCalledWith(
+      activeSession.userId,
+      'monitor-id',
+      1,
+      cssTarget,
+    );
+    expect(monitorPreview.preview).toHaveBeenCalledWith(monitor, cssTarget);
+  });
+
+  it('does not expose preview failures and enforces the preview rate limit', async () => {
+    const monitorPreview = {
+      preview: vi.fn().mockRejectedValue(new MonitorPreviewError('destination_not_allowed')),
+    };
+    const authentication = createAuthenticationDependencies(
+      {},
+      { increment: vi.fn().mockResolvedValue({ count: 1, ttlMs: 60_000 }) },
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+    );
+    const testApp = await buildApp({ authentication, monitorPreview });
+    app = testApp;
+    const cookie = 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+    const rejected = await testApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors/monitor-id/target/preview',
+      headers: { cookie },
+      payload: { targetType: 'whole_page' },
+    });
+
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json()).toEqual({ error: 'Preview target is not allowed' });
+    expect(rejected.body).not.toContain('destination_not_allowed');
+
+    await testApp.close();
+
+    const throttledAuthentication = createAuthenticationDependencies(
+      {},
+      { increment: vi.fn().mockResolvedValue({ count: 11, ttlMs: 31_000 }) },
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+    );
+    const throttledPreview = { preview: vi.fn() };
+    const throttledApp = await buildApp({
+      authentication: throttledAuthentication,
+      monitorPreview: throttledPreview,
+    });
+    app = throttledApp;
+
+    const throttled = await throttledApp.inject({
+      method: 'POST',
+      url: '/api/v1/monitors/monitor-id/target/preview',
+      headers: { cookie },
+      payload: { targetType: 'whole_page' },
+    });
+
+    expect(throttled.statusCode).toBe(429);
+    expect(throttled.headers['retry-after']).toBe('31');
+    expect(throttled.json()).toEqual({ error: 'Too many preview attempts' });
+    expect(throttledPreview.preview).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe target validation error without overwriting a newer monitor revision', async () => {
+    const authentication = createAuthenticationDependencies(
+      {},
+      undefined,
+      { authenticate: vi.fn().mockResolvedValue(activeSession) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        updateTarget: vi
+          .fn()
+          .mockRejectedValue(new MonitorTargetValidationError('selector is not valid CSS')),
+      },
+    );
+    const testApp = await buildApp({ authentication });
+    app = testApp;
+
+    const response = await testApp.inject({
+      method: 'PUT',
+      url: '/api/v1/monitors/monitor-id/target',
+      headers: {
+        cookie: 'pagepulse_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'if-match': '"1"',
+      },
+      payload: { selector: 'main[', targetType: 'css_selector' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Invalid monitor target' });
+    expect(response.body).not.toContain('selector is not valid CSS');
   });
 
   it('allows an owner to list and manage member lifecycle state', async () => {

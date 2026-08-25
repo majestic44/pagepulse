@@ -12,11 +12,11 @@ import {
 } from './migrate.js';
 
 describe('current schema compatibility', () => {
-  it('records the monitor schedule configuration migration', () => {
+  it('records the monitor target configuration migration', () => {
     expect(currentSchemaCompatibility).toEqual({
-      migrationId: 'monitor-schedule-configuration',
+      migrationId: 'monitor-target-configuration',
       minimumAppVersion: '0.0.0',
-      schemaVersion: 9,
+      schemaVersion: 10,
     });
   });
 });

@@ -83,6 +83,11 @@ The API uses Node's native Argon2id implementation. Keep `AUTH_ARGON2_MEMORY_KIB
 change. Configure the verification/reset token lifetimes and bounded login, reset and redemption rate limits through
 the matching `AUTH_*` and `*_TOKEN_TTL_MINUTES` variables in `.env.example`.
 
+Extraction previews use the Redis-backed `MONITOR_PREVIEW_RATE_LIMIT_MAX` /
+`MONITOR_PREVIEW_RATE_LIMIT_WINDOW_MS` policy (10 per minute by default). Previews are intentionally limited to an
+existing owned monitor URL, public HTML, and bounded text-only output; they reject private/reserved destinations and
+redirects before a connection is made. Do not loosen this policy or route previews through the browser worker.
+
 Session cookies are host-only, HTTP-only and `SameSite=Strict`; production deployments add the `Secure` attribute.
 `SESSION_IDLE_TTL_MINUTES` defaults to 480 (eight hours) and `SESSION_ABSOLUTE_TTL_MINUTES` defaults to 43,200
 (30 days). The idle lifetime must not exceed the absolute lifetime. Local HTTP development intentionally omits the

@@ -199,13 +199,38 @@ h3 {
   color: var(--muted);
   font-weight: 700;
 }
-.sign-in-form input {
+.sign-in-form input,
+.sign-in-form select {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   color: var(--text);
   font: inherit;
   padding: 0.75rem 0.85rem;
+}
+.extraction-preview {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 1.25rem;
+}
+.extraction-preview p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0.3rem 0 0;
+}
+.extraction-preview pre {
+  color: var(--text);
+  font:
+    0.9rem/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  margin: 1rem 0 0;
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .sign-in-form button,
 .session-actions button {

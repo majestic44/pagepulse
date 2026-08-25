@@ -37,6 +37,8 @@ describe('loadEnvironment', () => {
       AUTH_LOGIN_RATE_LIMIT_MAX: 5,
       AUTH_DELETION_RATE_LIMIT_MAX: 3,
       AUTH_TOTP_RATE_LIMIT_MAX: 5,
+      MONITOR_PREVIEW_RATE_LIMIT_MAX: 10,
+      MONITOR_PREVIEW_RATE_LIMIT_WINDOW_MS: 60_000,
     });
   });
 
