@@ -45,10 +45,10 @@ persist HTML or add any fetched content to a queue.
 1. Parse by source type.
 2. Extract the configured target.
 3. Remove scripts/styles and excluded regions.
-4. Normalize Unicode, whitespace and safe formatting.
-5. Normalize tracking parameters and approved relative timestamps.
-6. Detect/remove common ad/cookie regions conservatively.
-7. Apply member ignore selectors/patterns.
+4. Normalize Unicode, whitespace and safe formatting; mask approved relative timestamps so clock-driven labels do not create diffs.
+5. Strip known tracking parameters and sort remaining query parameters in canonical HTTP URLs.
+6. Detect/remove common ad/cookie regions conservatively from HTML `id`/`class` markers.
+7. Apply member ignore selectors plus bounded literal text patterns; patterns are never evaluated as regular expressions.
 8. Produce a canonical typed representation and SHA-256 content hash.
 
 ## Rule evaluation
